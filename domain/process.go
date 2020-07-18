@@ -36,6 +36,8 @@ type ProcessIface interface {
 	Pid() uint32
 	Uid() uint32
 	Gid() uint32
+	Cwd() (string, error)
+	Root() (string, error)
 	IsAdminCapabilitySet() bool
 	NsInodes() (map[string]Inode, error)
 	UserNsInode() (Inode, error)

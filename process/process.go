@@ -85,6 +85,26 @@ func (p *process) Gid() uint32 {
 	return p.gid
 }
 
+func (p *process) Cwd() (string, error) {
+
+	cwd, err := os.Readlink(p.cwd)
+	if err != nil {
+		return "", err
+	}
+
+	return cwd, nil
+}
+
+func (p *process) Root() (string, error) {
+
+	root, err := os.Readlink(p.root)
+	if err != nil {
+		return "", err
+	}
+
+	return root, nil
+}
+
 func (p *process) IsAdminCapabilitySet() bool {
 	return p.isCapabilitySet(cap.EFFECTIVE, cap.CAP_SYS_ADMIN)
 }

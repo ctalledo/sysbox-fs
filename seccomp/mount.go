@@ -54,6 +54,9 @@ func (m *mountSyscallInfo) process() (*sysResponse, error) {
 		case "sysfs":
 			logrus.Debugf("Processing new sysfs mount: %v", m)
 			return m.processSysMount(mip)
+		case "overlay":
+			logrus.Debugf("Processing new overlayfs mount: %v", m)
+			return m.processOverlayMount(mip)
 		case "nfs":
 			logrus.Debugf("Processing new nfs mount: %v", m)
 			return m.processNfsMount(mip)
@@ -132,6 +135,11 @@ func (m *mountSyscallInfo) process() (*sysResponse, error) {
 func (m *mountSyscallInfo) processProcMount(
 	mip *mountInfoParser) (*sysResponse, error) {
 
+	// Adjust mount attributes attending to process' root path.
+	if err := m.rootAdjust(); err != nil {
+		return nil, fmt.Errorf("Could not adjust mount attrs as per process' root")
+	}
+
 	// Create instructions payload.
 	payload := m.createProcPayload(mip)
 	if payload == nil {
@@ -181,8 +189,10 @@ func (m *mountSyscallInfo) createProcPayload(
 	// apply this to the new mountpoint (otherwise we will get a permission
 	// denied from the kernel when doing the mount).
 	procInfo := mip.GetInfo("/proc")
-	if _, ok := procInfo.VfsOptions["ro"]; ok == true {
-		payload[0].Flags |= unix.MS_RDONLY
+	if procInfo != nil {
+		if _, ok := procInfo.VfsOptions["ro"]; ok == true {
+			payload[0].Flags |= unix.MS_RDONLY
+		}
 	}
 
 	// Sysbox-fs "/proc" bind-mounts.
@@ -263,6 +273,11 @@ func (m *mountSyscallInfo) createProcPayload(
 func (m *mountSyscallInfo) processSysMount(
 	mip *mountInfoParser) (*sysResponse, error) {
 
+	// // Adjust mount attributes attending to process' root path.
+	// if err := m.rootAdjust(); err != nil {
+	// 	return nil, fmt.Errorf("Could not adjust mount attrs as per process' root")
+	// }
+
 	// Create instruction's payload.
 	payload := m.createSysPayload(mip)
 	if payload == nil {
@@ -312,8 +327,10 @@ func (m *mountSyscallInfo) createSysPayload(
 	// apply this to the new mountpoint (otherwise we will get a permission
 	// denied from the kernel when doing the mount).
 	procInfo := mip.GetInfo("/sys")
-	if _, ok := procInfo.VfsOptions["ro"]; ok == true {
-		payload[0].Flags |= unix.MS_RDONLY
+	if procInfo != nil {
+		if _, ok := procInfo.VfsOptions["ro"]; ok == true {
+			payload[0].Flags |= unix.MS_RDONLY
+		}
 	}
 
 	// Sysbox-fs "/sys" bind-mounts.
@@ -349,6 +366,64 @@ func (m *mountSyscallInfo) createSysPayload(
 			payload = append(payload, newelem)
 		}
 	}
+
+	return &payload
+}
+
+// Method handles overlayfs mount syscall requests.
+func (m *mountSyscallInfo) processOverlayMount(
+	mip *mountInfoParser) (*sysResponse, error) {
+
+	// Adjust mount attributes attending to process' root path.
+	if err := m.rootAdjust(); err != nil {
+		return nil, fmt.Errorf("Could not adjust mount attrs as per process' root")
+	}
+
+	// Create instructions payload.
+	payload := m.createOverlayMountPayload(mip)
+	if payload == nil {
+		return nil, fmt.Errorf("Could not construct overlayMount payload")
+	}
+
+	// Create nsenter-event envelope.
+	nss := m.tracer.sms.nss
+	event := nss.NewEvent(
+		m.syscallCtx.pid,
+		&domain.AllNSs,
+		//&domain.AllNSsButUser,
+		&domain.NSenterMessage{
+			Type:    domain.MountSyscallRequest,
+			Payload: payload,
+		},
+		nil,
+	)
+
+	// Launch nsenter-event.
+	err := nss.SendRequestEvent(event)
+	if err != nil {
+		return nil, err
+	}
+
+	// Obtain nsenter-event response.
+	responseMsg := nss.ReceiveResponseEvent(event)
+	if responseMsg.Type == domain.ErrorResponse {
+		resp := m.tracer.createErrorResponse(
+			m.reqId,
+			responseMsg.Payload.(fuse.IOerror).Code)
+		return resp, nil
+	}
+
+	return m.tracer.createSuccessResponse(m.reqId), nil
+}
+
+// Build instructions payload required for remount operations.
+func (m *mountSyscallInfo) createOverlayMountPayload(
+	mip *mountInfoParser) *[]*domain.MountSyscallPayload {
+
+	var payload []*domain.MountSyscallPayload
+
+	// Payload instruction for overlayfs mount request.
+	payload = append(payload, m.MountSyscallPayload)
 
 	return &payload
 }
@@ -606,4 +681,55 @@ func (m *mountSyscallInfo) createBindMountPayload(
 func (m *mountSyscallInfo) String() string {
 	return fmt.Sprintf("source: %s, target = %s, fstype = %s, flags = %#x, data = %s",
 		m.Source, m.Target, m.FsType, m.Flags, m.Data)
+}
+
+func (m *mountSyscallInfo) rootAdjust() error {
+
+	root := m.syscallCtx.root
+
+	if root == "/" {
+		return nil
+	}
+
+	m.Target = filepath.Join(root, m.Target)
+
+	if m.Data == "" {
+		return nil
+	}
+
+	switch m.FsType {
+
+	case "overlay":
+
+		layers := strings.Split(m.Data, ",")
+		var data []string
+
+		if len(layers) > 1 {
+			for i, elem := range layers {
+				layerComp := strings.Split(elem, "=")
+				if len(layerComp) > 1 {
+					layerComp[1] = filepath.Join(root, layerComp[1])
+					layers[i] = strings.Join(layerComp, "=")
+					logrus.Errorf("Rodny 3 data = %s", layers[i])
+				}
+
+				data = append(data, layers[i])
+			}
+
+			logrus.Errorf("Rodny 4 data = %v", data)
+			for i, elem := range data {
+				if i == 0 {
+					m.Data = elem
+				} else {
+					m.Data = fmt.Sprintf("%s,%s", m.Data, elem)
+				}
+			}
+			logrus.Errorf("Rodny 5 mount.Data = %s", m.Data)
+		}
+	}
+	// 	//lowerdir=/etc/rdwoo525711987/l,upperdir=/etc/rdwoo525711987/u,workdir=/etc/rdwoo525711987/w
+
+	logrus.Errorf("Rodny 2 printing root = %s, target = %s", root, m.Target)
+
+	return nil
 }

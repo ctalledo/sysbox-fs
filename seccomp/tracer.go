@@ -409,15 +409,21 @@ func (t *syscallTracer) processMount(
 		return t.createErrorResponse(req.Id, err), nil
 	}
 
+	// Collect 'current-working-dir' and 'root' of syscall process.
+	if mount.cwd, err = process.Cwd(); err != nil {
+		return t.createErrorResponse(req.Id, err), nil
+	}
+	if mount.root, err = process.Root(); err != nil {
+		return t.createErrorResponse(req.Id, err), nil
+	}
+
 	// To simplify mount processing logic, convert to absolute path if dealing
 	// with a relative path request.
 	if !filepath.IsAbs(mount.Target) {
-		cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", req.Pid))
-		if err != nil {
-			return nil, err
-		}
-		mount.Target = filepath.Join(cwd, mount.Target)
+		mount.Target = filepath.Join(mount.cwd, mount.Target)
 	}
+
+	logrus.Errorf("Rodny 1 printing cwd = %s, root = %s, target = %s", mount.cwd, mount.root, mount.Target)
 
 	// Process mount syscall.
 	return mount.process()
