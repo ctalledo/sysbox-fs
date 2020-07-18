@@ -273,10 +273,10 @@ func (m *mountSyscallInfo) createProcPayload(
 func (m *mountSyscallInfo) processSysMount(
 	mip *mountInfoParser) (*sysResponse, error) {
 
-	// // Adjust mount attributes attending to process' root path.
-	// if err := m.rootAdjust(); err != nil {
-	// 	return nil, fmt.Errorf("Could not adjust mount attrs as per process' root")
-	// }
+	// Adjust mount attributes attending to process' root path.
+	if err := m.rootAdjust(); err != nil {
+		return nil, fmt.Errorf("Could not adjust mount attrs as per process' root")
+	}
 
 	// Create instruction's payload.
 	payload := m.createSysPayload(mip)
@@ -433,6 +433,11 @@ func (m *mountSyscallInfo) createOverlayMountPayload(
 // order to enable nfs to be mounted from within a (non init) user-ns.
 func (m *mountSyscallInfo) processNfsMount(
 	mip *mountInfoParser) (*sysResponse, error) {
+
+	// Adjust mount attributes attending to process' root path.
+	if err := m.rootAdjust(); err != nil {
+		return nil, fmt.Errorf("Could not adjust mount attrs as per process' root")
+	}
 
 	// Create instruction's payload.
 	payload := m.createNfsMountPayload(mip)
@@ -603,6 +608,13 @@ func (m *mountSyscallInfo) createRemountPayload(
 func (m *mountSyscallInfo) processBindMount(
 	mip *mountInfoParser) (*sysResponse, error) {
 
+	// Notice that we are not adjusting mount attributes to deal with chroot'ed
+	// environments in bind-mount cases, as linux kernel does not appear to deal
+	// with this case any different than the non-chroot'ed scenario, meaning that
+	// the bind-mounts within a jail are only visible outside the jail and not
+	// inside the chroot'ed context (i.e. kernel is not taking into account the
+	// process' root attribute).
+
 	// Create instruction's payload.
 	payload := m.createBindMountPayload(mip)
 	if payload == nil {
@@ -683,6 +695,10 @@ func (m *mountSyscallInfo) String() string {
 		m.Source, m.Target, m.FsType, m.Flags, m.Data)
 }
 
+// Method addresses scenarios where the process generating the mount syscall has
+// a 'root' attribute different than default one ("/"). This is typically the case
+// in 'chroot'ed environments. Method's goal is to make all the require adjustments
+// so that sysbox-fs can carry out the mount in the expected context.
 func (m *mountSyscallInfo) rootAdjust() error {
 
 	root := m.syscallCtx.root
@@ -691,6 +707,7 @@ func (m *mountSyscallInfo) rootAdjust() error {
 		return nil
 	}
 
+	// 'Target' attribute will always require adjustment in chroot'ed envs.
 	m.Target = filepath.Join(root, m.Target)
 
 	if m.Data == "" {
@@ -699,8 +716,15 @@ func (m *mountSyscallInfo) rootAdjust() error {
 
 	switch m.FsType {
 
+	// 'Data' must be adjusted in overlayfs-mount cases.
+	//
+	// TODO: Explore the utilization patterns of 'data' attribute by procfs &
+	// sysfs, and find out if there's a need to make adjustments there too.
 	case "overlay":
 
+		// Expected pattern:
+		//
+		// lowerdir=/etc/rdwoo123/l,upperdir=/etc/rdwoo123/u,workdir=/etc/rdwoo123/w
 		layers := strings.Split(m.Data, ",")
 		var data []string
 
@@ -710,13 +734,11 @@ func (m *mountSyscallInfo) rootAdjust() error {
 				if len(layerComp) > 1 {
 					layerComp[1] = filepath.Join(root, layerComp[1])
 					layers[i] = strings.Join(layerComp, "=")
-					logrus.Errorf("Rodny 3 data = %s", layers[i])
 				}
 
 				data = append(data, layers[i])
 			}
 
-			logrus.Errorf("Rodny 4 data = %v", data)
 			for i, elem := range data {
 				if i == 0 {
 					m.Data = elem
@@ -724,12 +746,8 @@ func (m *mountSyscallInfo) rootAdjust() error {
 					m.Data = fmt.Sprintf("%s,%s", m.Data, elem)
 				}
 			}
-			logrus.Errorf("Rodny 5 mount.Data = %s", m.Data)
 		}
 	}
-	// 	//lowerdir=/etc/rdwoo525711987/l,upperdir=/etc/rdwoo525711987/u,workdir=/etc/rdwoo525711987/w
-
-	logrus.Errorf("Rodny 2 printing root = %s, target = %s", root, m.Target)
 
 	return nil
 }
