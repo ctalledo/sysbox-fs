@@ -374,6 +374,10 @@ func (m *mountSyscallInfo) createSysPayload(
 func (m *mountSyscallInfo) processOverlayMount(
 	mip *mountInfoParser) (*sysResponse, error) {
 
+	if err := m.createFsBlob(); err != nil {
+		return nil, fmt.Errorf("Could not create fsBlob structure")
+	}
+
 	// Adjust mount attributes attending to process' root path.
 	if err := m.rootAdjust(); err != nil {
 		return nil, fmt.Errorf("Could not adjust mount attrs as per process' root")
@@ -389,8 +393,7 @@ func (m *mountSyscallInfo) processOverlayMount(
 	nss := m.tracer.sms.nss
 	event := nss.NewEvent(
 		m.syscallCtx.pid,
-		&domain.AllNSs,
-		//&domain.AllNSsButUser,
+		&domain.AllNSsButUser,
 		&domain.NSenterMessage{
 			Type:    domain.MountSyscallRequest,
 			Payload: payload,
@@ -424,6 +427,29 @@ func (m *mountSyscallInfo) createOverlayMountPayload(
 
 	// Payload instruction for overlayfs mount request.
 	payload = append(payload, m.MountSyscallPayload)
+
+	// Insert newly appended fields.
+	payload[0].Header = domain.NSenterMsgHeader{
+		Pid: m.pid,
+		Uid: m.uid,
+		Gid: m.gid,
+	}
+
+	// m.MountSyscallPayload.Header.Pid = m.pid
+	// m.MountSyscallPayload.Header.Uid = m.uid
+	// m.MountSyscallPayload.Header.Gid = m.gid
+
+	//m.MountSyscallPayload.FsBlob = m.FsBlob
+	payload[0].WorkDir = m.FsBlob.(domain.OverlayfsBlob).WorkDir
+
+	// // Define a common payload-header for just one of the 'mountSyscallPayload'
+	// // instructions. The subsequent instructions within this payload-slice, will
+	// // rely on this header too.
+	// payload.Header = domain.NSenterMsgHeader{
+	// 	Pid: process.Pid(),
+	// 	Uid: 0, // process with admin_cap, uid is indifferent
+	// 	Gid: 0, // process with admin_cap, gid is indifferent
+	// }
 
 	return &payload
 }
@@ -721,32 +747,123 @@ func (m *mountSyscallInfo) rootAdjust() error {
 	// TODO: Explore the utilization patterns of 'data' attribute by procfs &
 	// sysfs, and find out if there's a need to make adjustments there too.
 	case "overlay":
+		var layer string
+		var layerComp string
+
+		var blob = m.FsBlob.(domain.OverlayfsBlob)
+
+		if blob.LowerDir != "" {
+			layerComp = filepath.Join(root, blob.LowerDir)
+			layer = fmt.Sprintf("%s=%s", "lowerdir", layerComp)
+			m.Data = layer
+		}
+
+		if blob.UpperDir != "" {
+			layerComp = filepath.Join(root, blob.UpperDir)
+			layer = fmt.Sprintf("%s=%s", "upperdir", layerComp)
+
+			if m.Data == "" {
+				m.Data = layer
+			} else {
+				m.Data = fmt.Sprintf("%s,%s", m.Data, layer)
+			}
+		}
+
+		if blob.WorkDir != "" {
+			layerComp = filepath.Join(root, blob.WorkDir)
+			layer = fmt.Sprintf("%s=%s", "workdir", layerComp)
+
+			if m.Data == "" {
+				m.Data = layer
+			} else {
+				m.Data = fmt.Sprintf("%s,%s", m.Data, layer)
+			}
+		}
+	}
+
+	// 	// Expected pattern:
+	// 	//
+	// 	// lowerdir=/etc/rdwoo123/l,upperdir=/etc/rdwoo123/u,workdir=/etc/rdwoo123/w
+	// 	layers := strings.Split(m.Data, ",")
+	// 	var data []string
+
+	// 	if len(layers) > 1 {
+	// 		for i, elem := range layers {
+	// 			layerComp := strings.Split(elem, "=")
+	// 			if len(layerComp) > 1 {
+	// 				layerComp[1] = filepath.Join(root, layerComp[1])
+	// 				layers[i] = strings.Join(layerComp, "=")
+	// 			}
+
+	// 			data = append(data, layers[i])
+
+	// 			if layerComp[0] == "workdir" {
+	// 				m.FsBlob.WorkDir = layerComp[1]
+	// 			}
+	// 		}
+
+	// 		for i, elem := range data {
+	// 			if i == 0 {
+	// 				m.Data = elem
+	// 			} else {
+	// 				m.Data = fmt.Sprintf("%s,%s", m.Data, elem)
+	// 			}
+	// 		}
+	// 	}
+	// }
+
+	return nil
+}
+
+func (m *mountSyscallInfo) createFsBlob() error {
+
+	if m.Data == "" {
+		return nil
+	}
+
+	switch m.FsType {
+
+	case "overlay":
+
+		var blob domain.OverlayfsBlob
 
 		// Expected pattern:
 		//
 		// lowerdir=/etc/rdwoo123/l,upperdir=/etc/rdwoo123/u,workdir=/etc/rdwoo123/w
+
+		// Brake per layer.
 		layers := strings.Split(m.Data, ",")
-		var data []string
 
-		if len(layers) > 1 {
-			for i, elem := range layers {
-				layerComp := strings.Split(elem, "=")
-				if len(layerComp) > 1 {
-					layerComp[1] = filepath.Join(root, layerComp[1])
-					layers[i] = strings.Join(layerComp, "=")
-				}
+		for _, elem := range layers {
+			// Brake per layer-component.
+			layerComp := strings.Split(elem, "=")
 
-				data = append(data, layers[i])
+			if len(layerComp) == 1 {
+				continue
 			}
 
-			for i, elem := range data {
-				if i == 0 {
-					m.Data = elem
-				} else {
-					m.Data = fmt.Sprintf("%s,%s", m.Data, elem)
-				}
+			// if len(layerComp) > 1 {
+			// 	layers[i] = strings.Join(layerComp, "=")
+			// }
+			/// data = append(data, layers[i])
+
+			switch layerComp[0] {
+
+			case "lowerdir":
+				blob.LowerDir = layerComp[1]
+
+			case "upperdir":
+				blob.UpperDir = layerComp[1]
+
+			case "workdir":
+				blob.WorkDir = layerComp[1]
+
+			case "mergedir":
+				blob.MergeDir = layerComp[1]
 			}
 		}
+
+		m.FsBlob = blob
 	}
 
 	return nil

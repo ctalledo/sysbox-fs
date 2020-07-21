@@ -131,11 +131,9 @@ type NSenterMessage struct {
 }
 
 type NSenterMsgHeader struct {
-	Pid            uint32 `json:"pid"`
-	Uid            uint32 `json:"uid"`
-	Gid            uint32 `json:"gid"`
-	CapDacRead     bool   `json:"capDacRead"`
-	CapDacOverride bool   `json:"capDacOverride"`
+	Pid uint32 `json:"pid"`
+	Uid uint32 `json:"uid"`
+	Gid uint32 `json:"gid"`
 }
 
 type LookupPayload struct {
@@ -163,14 +161,25 @@ type ReadDirPayload struct {
 }
 
 type MountSyscallPayload struct {
-	Source string `json:"source"`
-	Target string `json:"target"`
-	FsType string `json:"fstype"`
-	Flags  uint64 `json:"flags"`
-	Data   string `json:"data"`
+	Header  NSenterMsgHeader
+	Source  string      `json:"source"`
+	Target  string      `json:"target"`
+	FsType  string      `json:"fstype"`
+	Flags   uint64      `json:"flags"`
+	Data    string      `json:"data"`
+	FsBlob  interface{} `json:"fsblob"`
+	WorkDir string      `json:"workdir"`
+}
+
+type OverlayfsBlob struct {
+	LowerDir string `json:"-"`
+	UpperDir string `json:"-"`
+	WorkDir  string `json:"workdir"`
+	MergeDir string `json:"-"`
 }
 
 type UmountSyscallPayload struct {
+	Header NSenterMsgHeader
 	Target string `json:"target"`
 	FsType uint8  `json:"-"`
 	Flags  uint64 `json:"flags"`

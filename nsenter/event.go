@@ -634,10 +634,36 @@ func (e *NSenterEvent) processMountSyscallRequest() error {
 
 			break
 		}
+
+		// if payload[i].FsType == "overlay" {
+		// 	var blob domain.OverlayfsBlob = payload[i].FsBlob.(domain.OverlayfsBlob)
+		// 	if blob.WorkDir != "" {
+		// 		err = os.Chown(blob.WorkDir,
+		// 			int(payload[i].Header.Uid),
+		// 			int(payload[i].Header.Gid),
+		// 		)
+		// 		if err != nil {
+		// 			break
+		// 		}
+		// 	}
+		// }
+
+		if payload[i].FsType == "overlay" {
+			workDir := payload[i].WorkDir
+			if workDir != "" {
+				err = os.Chown(workDir,
+					int(payload[i].Header.Uid),
+					int(payload[i].Header.Gid),
+				)
+				if err != nil {
+					break
+				}
+			}
+		}
 	}
 
 	if err != nil {
-		// Unmount previously executed mount instructions (unless it's a remount)
+		// Unmount previously executed mount instructions (unless it's a remount).
 		//
 		// TODO: ideally we would revert remounts too, but to do this we need information
 		// that we don't have at this stage.

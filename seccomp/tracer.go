@@ -410,6 +410,11 @@ func (t *syscallTracer) processMount(
 	}
 
 	// Collect 'current-working-dir' and 'root' of syscall process.
+	mount.uid = process.Uid()
+	mount.gid = process.Gid()
+	//mount.cwd = process.Cwd()
+	//mount.root = process.Root()
+
 	if mount.cwd, err = process.Cwd(); err != nil {
 		return t.createErrorResponse(req.Id, err), nil
 	}
