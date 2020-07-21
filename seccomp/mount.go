@@ -435,21 +435,9 @@ func (m *mountSyscallInfo) createOverlayMountPayload(
 		Gid: m.gid,
 	}
 
-	// m.MountSyscallPayload.Header.Pid = m.pid
-	// m.MountSyscallPayload.Header.Uid = m.uid
-	// m.MountSyscallPayload.Header.Gid = m.gid
-
 	//m.MountSyscallPayload.FsBlob = m.FsBlob
 	payload[0].WorkDir = m.FsBlob.(domain.OverlayfsBlob).WorkDir
-
-	// // Define a common payload-header for just one of the 'mountSyscallPayload'
-	// // instructions. The subsequent instructions within this payload-slice, will
-	// // rely on this header too.
-	// payload.Header = domain.NSenterMsgHeader{
-	// 	Pid: process.Pid(),
-	// 	Uid: 0, // process with admin_cap, uid is indifferent
-	// 	Gid: 0, // process with admin_cap, gid is indifferent
-	// }
+	//payload[0].FsBlob = m.FsBlob
 
 	return &payload
 }
@@ -827,9 +815,7 @@ func (m *mountSyscallInfo) createFsBlob() error {
 
 		var blob domain.OverlayfsBlob
 
-		// Expected pattern:
-		//
-		// lowerdir=/etc/rdwoo123/l,upperdir=/etc/rdwoo123/u,workdir=/etc/rdwoo123/w
+		// Expected pattern: lowerdir=/etc/rdwoo123/l,upperdir=/etc/rdwoo123/u,workdir=/etc/rdwoo123/w
 
 		// Brake per layer.
 		layers := strings.Split(m.Data, ",")
@@ -842,24 +828,14 @@ func (m *mountSyscallInfo) createFsBlob() error {
 				continue
 			}
 
-			// if len(layerComp) > 1 {
-			// 	layers[i] = strings.Join(layerComp, "=")
-			// }
-			/// data = append(data, layers[i])
-
 			switch layerComp[0] {
 
 			case "lowerdir":
 				blob.LowerDir = layerComp[1]
-
 			case "upperdir":
 				blob.UpperDir = layerComp[1]
-
 			case "workdir":
 				blob.WorkDir = layerComp[1]
-
-			case "mergedir":
-				blob.MergeDir = layerComp[1]
 			}
 		}
 

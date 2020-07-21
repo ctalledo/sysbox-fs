@@ -409,24 +409,17 @@ func (t *syscallTracer) processMount(
 		return t.createErrorResponse(req.Id, err), nil
 	}
 
-	// Collect 'current-working-dir' and 'root' of syscall process.
-	mount.uid = process.Uid()
-	mount.gid = process.Gid()
-	//mount.cwd = process.Cwd()
-	//mount.root = process.Root()
-
-	if mount.cwd, err = process.Cwd(); err != nil {
-		return t.createErrorResponse(req.Id, err), nil
-	}
-	if mount.root, err = process.Root(); err != nil {
-		return t.createErrorResponse(req.Id, err), nil
-	}
-
 	// To simplify mount processing logic, convert to absolute path if dealing
 	// with a relative path request.
 	if !filepath.IsAbs(mount.Target) {
 		mount.Target = filepath.Join(mount.cwd, mount.Target)
 	}
+
+	// Collect process attributes required for mount execution.
+	mount.uid = process.Uid()
+	mount.gid = process.Gid()
+	mount.cwd = process.Cwd()
+	mount.root = process.Root()
 
 	// Process mount syscall.
 	return mount.process()
@@ -476,19 +469,17 @@ func (t *syscallTracer) processUmount(
 		return t.createErrorResponse(req.Id, err), nil
 	}
 
-	// Collect 'current-working-dir' and 'root' of syscall process.
-	if umount.cwd, err = process.Cwd(); err != nil {
-		return t.createErrorResponse(req.Id, err), nil
-	}
-	if umount.root, err = process.Root(); err != nil {
-		return t.createErrorResponse(req.Id, err), nil
-	}
-
 	// To simplify umount processing logic, convert to absolute path if dealing
 	// with a relative path request.
 	if !filepath.IsAbs(umount.Target) {
 		umount.Target = filepath.Join(umount.cwd, umount.Target)
 	}
+
+	// Collect process attributes required for umount execution.
+	umount.uid = process.Uid()
+	umount.gid = process.Gid()
+	umount.cwd = process.Cwd()
+	umount.root = process.Root()
 
 	// Process umount syscall.
 	return umount.process()

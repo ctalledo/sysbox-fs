@@ -85,24 +85,24 @@ func (p *process) Gid() uint32 {
 	return p.gid
 }
 
-func (p *process) Cwd() (string, error) {
+func (p *process) Cwd() string {
 
 	cwd, err := os.Readlink(p.cwd)
 	if err != nil {
-		return "", err
+		return ""
 	}
 
-	return cwd, nil
+	return cwd
 }
 
-func (p *process) Root() (string, error) {
+func (p *process) Root() string {
 
 	root, err := os.Readlink(p.root)
 	if err != nil {
-		return "", err
+		return ""
 	}
 
-	return root, nil
+	return root
 }
 
 func (p *process) IsAdminCapabilitySet() bool {

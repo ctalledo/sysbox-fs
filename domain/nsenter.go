@@ -167,8 +167,10 @@ type MountSyscallPayload struct {
 	FsType  string      `json:"fstype"`
 	Flags   uint64      `json:"flags"`
 	Data    string      `json:"data"`
-	FsBlob  interface{} `json:"fsblob"`
 	WorkDir string      `json:"workdir"`
+	Uid     uint32      `json:"uid"`
+	Gid     uint32      `json:"gid"`
+	FsBlob  interface{} `json:"fsblob"`
 }
 
 type OverlayfsBlob struct {
