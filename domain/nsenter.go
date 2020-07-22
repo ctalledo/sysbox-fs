@@ -161,23 +161,13 @@ type ReadDirPayload struct {
 }
 
 type MountSyscallPayload struct {
-	Header  NSenterMsgHeader
-	Source  string      `json:"source"`
-	Target  string      `json:"target"`
-	FsType  string      `json:"fstype"`
-	Flags   uint64      `json:"flags"`
-	Data    string      `json:"data"`
-	WorkDir string      `json:"workdir"`
-	Uid     uint32      `json:"uid"`
-	Gid     uint32      `json:"gid"`
-	FsBlob  interface{} `json:"fsblob"`
-}
-
-type OverlayfsBlob struct {
-	LowerDir string `json:"-"`
-	UpperDir string `json:"-"`
-	WorkDir  string `json:"workdir"`
-	MergeDir string `json:"-"`
+	Header NSenterMsgHeader
+	Source string `json:"source"`
+	Target string `json:"target"`
+	FsType string `json:"fstype"`
+	Flags  uint64 `json:"flags"`
+	Data   string `json:"data"`
+	FsBlob OverlayfsBlob
 }
 
 type UmountSyscallPayload struct {
@@ -185,4 +175,11 @@ type UmountSyscallPayload struct {
 	Target string `json:"target"`
 	FsType uint8  `json:"-"`
 	Flags  uint64 `json:"flags"`
+}
+
+type OverlayfsBlob struct {
+	LowerDir string `json:"-"`
+	UpperDir string `json:"-"`
+	WorkDir  string `json:"workdir"`
+	MergeDir string `json:"-"`
 }

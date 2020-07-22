@@ -607,6 +607,26 @@ func (e *NSenterEvent) processDirReadRequest() error {
 	return nil
 }
 
+func (e *NSenterEvent) processFsBlobMount(payload *domain.MountSyscallPayload) error {
+
+	switch payload.FsType {
+
+	case "overlay":
+		workDir := filepath.Join(payload.FsBlob.WorkDir, "work")
+		if workDir != "" {
+			err := os.Chown(workDir,
+				int(payload.Header.Uid),
+				int(payload.Header.Gid),
+			)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func (e *NSenterEvent) processMountSyscallRequest() error {
 
 	var (
@@ -626,51 +646,12 @@ func (e *NSenterEvent) processMountSyscallRequest() error {
 			payload[i].Data,
 		)
 		if err != nil {
-			// Create error response msg.
-			e.ResMsg = &domain.NSenterMessage{
-				Type:    domain.ErrorResponse,
-				Payload: &fuse.IOerror{RcvError: err},
-			}
-
 			break
 		}
 
-		// if payload[i].FsType == "overlay" {
-		// 	var blob domain.OverlayfsBlob = payload[i].FsBlob.(domain.OverlayfsBlob)
-		// 	if blob.WorkDir != "" {
-		// 		blob.WorkDir = filepath.Join(blob.WorkDir, "work")
-		// 		err = os.Chown(blob.WorkDir,
-		// 			int(payload[i].Header.Uid),
-		// 			int(payload[i].Header.Gid),
-		// 		)
-		// 		if err != nil {
-		// 			e.ResMsg = &domain.NSenterMessage{
-		// 				Type:    domain.ErrorResponse,
-		// 				Payload: &fuse.IOerror{RcvError: err},
-		// 			}
-
-		// 			break
-		// 		}
-		// 	}
-		// }
-
-		if payload[i].FsType == "overlay" {
-			workDir := payload[i].WorkDir
-			workDir = filepath.Join(workDir, "work")
-			if workDir != "" {
-				err = os.Chown(workDir,
-					int(payload[i].Header.Uid),
-					int(payload[i].Header.Gid),
-				)
-				if err != nil {
-					e.ResMsg = &domain.NSenterMessage{
-						Type:    domain.ErrorResponse,
-						Payload: &fuse.IOerror{RcvError: err},
-					}
-
-					break
-				}
-			}
+		// Process fs-specific blob.
+		if err = e.processFsBlobMount(&payload[i]); err != nil {
+			break
 		}
 	}
 
@@ -683,6 +664,12 @@ func (e *NSenterEvent) processMountSyscallRequest() error {
 			if payload[j].Flags&unix.MS_REMOUNT != unix.MS_REMOUNT {
 				_ = unix.Unmount(payload[j].Target, 0)
 			}
+		}
+
+		// Create error response msg.
+		e.ResMsg = &domain.NSenterMessage{
+			Type:    domain.ErrorResponse,
+			Payload: &fuse.IOerror{RcvError: err},
 		}
 
 		return nil

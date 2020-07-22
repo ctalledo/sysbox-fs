@@ -428,16 +428,12 @@ func (m *mountSyscallInfo) createOverlayMountPayload(
 	// Payload instruction for overlayfs mount request.
 	payload = append(payload, m.MountSyscallPayload)
 
-	// Insert newly appended fields.
+	// Insert appended fields.
 	payload[0].Header = domain.NSenterMsgHeader{
 		Pid: m.pid,
 		Uid: m.uid,
 		Gid: m.gid,
 	}
-
-	//m.MountSyscallPayload.FsBlob = m.FsBlob
-	payload[0].WorkDir = m.FsBlob.(domain.OverlayfsBlob).WorkDir
-	//payload[0].FsBlob = m.FsBlob
 
 	return &payload
 }
@@ -738,7 +734,7 @@ func (m *mountSyscallInfo) rootAdjust() error {
 		var layer string
 		var layerComp string
 
-		var blob = m.FsBlob.(domain.OverlayfsBlob)
+		var blob = m.FsBlob
 
 		if blob.LowerDir != "" {
 			layerComp = filepath.Join(root, blob.LowerDir)
@@ -768,37 +764,6 @@ func (m *mountSyscallInfo) rootAdjust() error {
 			}
 		}
 	}
-
-	// 	// Expected pattern:
-	// 	//
-	// 	// lowerdir=/etc/rdwoo123/l,upperdir=/etc/rdwoo123/u,workdir=/etc/rdwoo123/w
-	// 	layers := strings.Split(m.Data, ",")
-	// 	var data []string
-
-	// 	if len(layers) > 1 {
-	// 		for i, elem := range layers {
-	// 			layerComp := strings.Split(elem, "=")
-	// 			if len(layerComp) > 1 {
-	// 				layerComp[1] = filepath.Join(root, layerComp[1])
-	// 				layers[i] = strings.Join(layerComp, "=")
-	// 			}
-
-	// 			data = append(data, layers[i])
-
-	// 			if layerComp[0] == "workdir" {
-	// 				m.FsBlob.WorkDir = layerComp[1]
-	// 			}
-	// 		}
-
-	// 		for i, elem := range data {
-	// 			if i == 0 {
-	// 				m.Data = elem
-	// 			} else {
-	// 				m.Data = fmt.Sprintf("%s,%s", m.Data, elem)
-	// 			}
-	// 		}
-	// 	}
-	// }
 
 	return nil
 }
