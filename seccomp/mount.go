@@ -425,15 +425,27 @@ func (m *mountSyscallInfo) createOverlayMountPayload(
 
 	var payload []*domain.MountSyscallPayload
 
+	// Create a process struct to represent the process generating the 'mount'
+	// instruction, and extract its capabilities to hand them out to 'nsenter'
+	// logic.
+	process := m.tracer.sms.prs.ProcessCreate(m.pid, 0, 0)
+
 	// Payload instruction for overlayfs mount request.
 	payload = append(payload, m.MountSyscallPayload)
 
 	// Insert appended fields.
 	payload[0].Header = domain.NSenterMsgHeader{
-		Pid: m.pid,
-		Uid: m.uid,
-		Gid: m.gid,
+		Pid:            m.pid,
+		Uid:            m.uid,
+		Gid:            m.gid,
+		Root:           m.root,
+		Cwd:            m.cwd,
+		CapSysAdmin:    process.IsSysAdminCapabilitySet(),
+		CapDacRead:     process.IsDacReadCapabilitySet(),
+		CapDacOverride: process.IsDacOverrideCapabilitySet(),
 	}
+
+	payload[0].FsBlob = m.FsBlob
 
 	return &payload
 }
@@ -701,8 +713,8 @@ func (m *mountSyscallInfo) createBindMountPayload(
 }
 
 func (m *mountSyscallInfo) String() string {
-	return fmt.Sprintf("source: %s, target = %s, fstype = %s, flags = %#x, data = %s",
-		m.Source, m.Target, m.FsType, m.Flags, m.Data)
+	return fmt.Sprintf("source: %s, target = %s, fstype = %s, flags = %#x, data = %s, root = %s, cwd = %s",
+		m.Source, m.Target, m.FsType, m.Flags, m.Data, m.root, m.cwd)
 }
 
 // Method addresses scenarios where the process generating the mount syscall has
@@ -756,6 +768,7 @@ func (m *mountSyscallInfo) rootAdjust() error {
 		if blob.WorkDir != "" {
 			layerComp = filepath.Join(root, blob.WorkDir)
 			layer = fmt.Sprintf("%s=%s", "workdir", layerComp)
+			m.FsBlob.WorkDir = layerComp
 
 			if m.Data == "" {
 				m.Data = layer

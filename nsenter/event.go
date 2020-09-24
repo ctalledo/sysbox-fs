@@ -39,6 +39,7 @@ import (
 
 	"github.com/nestybox/sysbox-fs/domain"
 	"github.com/nestybox/sysbox-fs/fuse"
+	"github.com/nestybox/sysbox-fs/process"
 	"github.com/nestybox/sysbox-runc/libcontainer"
 )
 
@@ -83,6 +84,9 @@ type NSenterEvent struct {
 
 	// Zombie Reaper (for left-over nsenter child processes)
 	reaper *zombieReaper
+
+	// Backpointer to Nsenter service
+	service *nsenterService
 }
 
 //
@@ -612,6 +616,10 @@ func (e *NSenterEvent) processFsBlobMount(payload *domain.MountSyscallPayload) e
 	switch payload.FsType {
 
 	case "overlay":
+		if payload.FsBlob.WorkDir == "" {
+			return nil
+		}
+
 		workDir := filepath.Join(payload.FsBlob.WorkDir, "work")
 		if workDir != "" {
 			err := os.Chown(workDir,
@@ -635,6 +643,34 @@ func (e *NSenterEvent) processMountSyscallRequest() error {
 	)
 
 	payload := e.ReqMsg.Payload.([]domain.MountSyscallPayload)
+
+	if payload[0].FsType == "overlay" {
+		// // Create a 'process' struct to represent the 'sysbox-fs nsenter' process
+		// // executing this logic.
+		// process := e.service.prs.ProcessCreate(0, 0, 0)
+
+		// // Extract payload-header from the first element of the payload slice.
+		header := payload[0].Header
+
+		// // Adjust 'nsenter' process personality to the end-user's original process.
+		// if err := process.Camouflage(
+		// 	header.Uid,
+		// 	header.Gid,
+		// 	header.CapSysAdmin,
+		// 	header.CapDacRead,
+		// 	header.CapDacOverride); err != nil {
+
+		// 	// Send an error-message response.
+		// 	e.ResMsg = &domain.NSenterMessage{
+		// 		Type:    domain.ErrorResponse,
+		// 		Payload: &fuse.IOerror{RcvError: err},
+		// 	}
+
+		// 	return nil
+		// }
+
+		os.Chdir(header.Cwd)
+	}
 
 	// Perform mount instructions.
 	for i = 0; i < len(payload); i++ {
@@ -915,7 +951,11 @@ func Init() (err error) {
 	// specific env vars.
 	os.Clearenv()
 
-	var event = NSenterEvent{}
+	var nsenterService nsenterService
+	var processService = process.NewProcessService()
+
+	nsenterService.Setup(processService)
+	var event = NSenterEvent{service: &nsenterService}
 
 	// Process incoming request.
 	err = event.processRequest(pipe)

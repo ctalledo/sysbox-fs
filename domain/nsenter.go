@@ -95,6 +95,7 @@ type NSenterServiceIface interface {
 		req *NSenterMessage,
 		res *NSenterMessage) NSenterEventIface
 
+	Setup(prs ProcessServiceIface)
 	SendRequestEvent(e NSenterEventIface) error
 	ReceiveResponseEvent(e NSenterEventIface) *NSenterMessage
 }
@@ -131,9 +132,14 @@ type NSenterMessage struct {
 }
 
 type NSenterMsgHeader struct {
-	Pid uint32 `json:"pid"`
-	Uid uint32 `json:"uid"`
-	Gid uint32 `json:"gid"`
+	Pid            uint32 `json:"pid"`
+	Uid            uint32 `json:"uid"`
+	Gid            uint32 `json:"gid"`
+	Root           string `json:"root"`
+	Cwd            string `json:"cwd"`
+	CapSysAdmin    bool   `json:"capAdmin"`
+	CapDacRead     bool   `json:"capDacRead"`
+	CapDacOverride bool   `json:"capDacOverride"`
 }
 
 type LookupPayload struct {

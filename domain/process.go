@@ -38,12 +38,20 @@ type ProcessIface interface {
 	Gid() uint32
 	Cwd() string
 	Root() string
-	IsAdminCapabilitySet() bool
+	IsSysAdminCapabilitySet() bool
+	IsDacReadCapabilitySet() bool
+	IsDacOverrideCapabilitySet() bool
 	NsInodes() (map[string]Inode, error)
 	UserNsInode() (Inode, error)
 	UserNsInodeParent() (Inode, error)
 	CreateNsInodes(Inode) error
 	PathAccess(path string, accessFlags AccessMode) error
+	Camouflage(
+		uid uint32,
+		gid uint32,
+		capSysAdmin bool,
+		capDacRead bool,
+		capDacOverride bool) error
 }
 
 type ProcessServiceIface interface {

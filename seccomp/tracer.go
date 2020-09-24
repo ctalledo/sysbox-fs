@@ -25,9 +25,9 @@ import (
 	"strings"
 	"syscall"
 
-	libseccomp "github.com/nestybox/sysbox-libs/libseccomp-golang"
 	"github.com/nestybox/sysbox-fs/domain"
 	unixIpc "github.com/nestybox/sysbox-ipc/unix"
+	libseccomp "github.com/nestybox/sysbox-libs/libseccomp-golang"
 	"github.com/nestybox/sysbox-libs/pidmonitor"
 
 	"github.com/sirupsen/logrus"
@@ -398,7 +398,7 @@ func (t *syscallTracer) processMount(
 	// mount operations. Otherwise, return here and let kernel handle the mount
 	// instruction.
 	process := t.sms.prs.ProcessCreate(req.Pid, 0, 0)
-	if !(process.IsAdminCapabilitySet()) {
+	if !(process.IsSysAdminCapabilitySet()) {
 		return t.createErrorResponse(req.Id, syscall.EPERM), nil
 	}
 
@@ -458,7 +458,7 @@ func (t *syscallTracer) processUmount(
 	// umount operations. Otherwise, return here and let kernel handle the mount
 	// instruction.
 	process := t.sms.prs.ProcessCreate(req.Pid, 0, 0)
-	if !(process.IsAdminCapabilitySet()) {
+	if !(process.IsSysAdminCapabilitySet()) {
 		return t.createErrorResponse(req.Id, syscall.EPERM), nil
 	}
 

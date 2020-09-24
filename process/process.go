@@ -29,8 +29,8 @@ import (
 
 	"github.com/nestybox/sysbox-fs/domain"
 	cap "github.com/nestybox/sysbox-libs/capability"
-
 	"golang.org/x/sys/unix"
+	setxid "gopkg.in/hlandau/service.v1/daemon/setuid"
 )
 
 //var AppFs = afero.NewOsFs()
@@ -105,8 +105,16 @@ func (p *process) Root() string {
 	return root
 }
 
-func (p *process) IsAdminCapabilitySet() bool {
+func (p *process) IsSysAdminCapabilitySet() bool {
 	return p.isCapabilitySet(cap.EFFECTIVE, cap.CAP_SYS_ADMIN)
+}
+
+func (p *process) IsDacReadCapabilitySet() bool {
+	return p.isCapabilitySet(cap.EFFECTIVE, cap.CAP_DAC_READ_SEARCH)
+}
+
+func (p *process) IsDacOverrideCapabilitySet() bool {
+	return p.isCapabilitySet(cap.EFFECTIVE, cap.CAP_DAC_OVERRIDE)
 }
 
 // Simple wrapper method to set capability values.
@@ -149,6 +157,100 @@ func (p *process) initCapability() error {
 	}
 
 	p.cap = c
+
+	return nil
+}
+
+// Camouflage() method's purpose is to adjust the process personality to another
+// process. The ultimate goal is to be able to utilize a 'proxy' process (such
+// as 'sysbox-fs nsenter') to execute instructions on behalf of the original
+// process.
+func (p *process) Camouflage(
+	uid uint32,
+	gid uint32,
+	capSysAdmin bool,
+	capDacRead bool,
+	capDacOverride bool) error {
+
+	var capChangeRequired bool = false
+
+	// Initialize capability struct if not already done.
+	if p.cap == nil {
+		if err := p.initCapability(); err != nil {
+			return err
+		}
+	}
+
+	// If UID corresponds to 'root' user then adjust capabilities of this
+	// running process accordingly.
+	if uid == 0 {
+
+		if !capSysAdmin {
+			p.cap.Unset(cap.EFFECTIVE, cap.CAP_SYS_ADMIN)
+			capChangeRequired = true
+		}
+		if !capDacRead {
+			p.cap.Unset(cap.EFFECTIVE, cap.CAP_DAC_READ_SEARCH)
+			capChangeRequired = true
+		}
+		if !capDacOverride {
+			p.cap.Unset(cap.EFFECTIVE, cap.CAP_DAC_OVERRIDE)
+			capChangeRequired = true
+		}
+
+		if capChangeRequired {
+			if err := p.cap.Apply(
+				cap.EFFECTIVE | cap.PERMITTED | cap.INHERITABLE); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	// If UID is 'non-root' then we proceed as below:
+	//
+	// 1) Execute setregid() syscall to set this process' effective gid.
+	// 2) Execute setreuid() syscall to set this process' effective uid.
+	// 3) Adjust capabilities to match original (end-user) process.
+	//
+	// Notice that during execution of 2) all effective capabilities of the
+	// running process will be reset, which is something that we are looking
+	// after given that 'sysbox-fs nsenter' process by default runs with all
+	// capabilities turned on.
+
+	if err := setxid.Setresgid(-1, int(gid), -1); err != nil {
+		return err
+	}
+
+	if err := setxid.Setresuid(-1, int(uid), -1); err != nil {
+		return err
+	}
+
+	if capSysAdmin || capDacRead || capDacOverride {
+
+		p.cap.Clear(cap.EFFECTIVE)
+
+		if capSysAdmin {
+			p.cap.Set(cap.EFFECTIVE, cap.CAP_SYS_ADMIN)
+			capChangeRequired = true
+		}
+		if capDacRead {
+			p.cap.Set(cap.EFFECTIVE, cap.CAP_DAC_READ_SEARCH)
+			capChangeRequired = true
+		}
+		if capDacOverride {
+			p.cap.Set(cap.EFFECTIVE, cap.CAP_DAC_OVERRIDE)
+			capChangeRequired = true
+		}
+
+		if capChangeRequired {
+			if err := p.cap.Apply(
+				cap.EFFECTIVE | cap.PERMITTED | cap.INHERITABLE); err != nil {
+				return err
+			}
+		}
+	}
 
 	return nil
 }
