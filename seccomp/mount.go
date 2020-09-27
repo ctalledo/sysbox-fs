@@ -419,7 +419,7 @@ func (m *mountSyscallInfo) processOverlayMount(
 	return m.tracer.createSuccessResponse(m.reqId), nil
 }
 
-// Build instructions payload required for remount operations.
+// Build instructions payload required for overlay-mount operations.
 func (m *mountSyscallInfo) createOverlayMountPayload(
 	mip *mountInfoParser) *[]*domain.MountSyscallPayload {
 
@@ -435,14 +435,15 @@ func (m *mountSyscallInfo) createOverlayMountPayload(
 
 	// Insert appended fields.
 	payload[0].Header = domain.NSenterMsgHeader{
-		Pid:            m.pid,
-		Uid:            m.uid,
-		Gid:            m.gid,
-		Root:           m.root,
-		Cwd:            m.cwd,
-		CapSysAdmin:    process.IsSysAdminCapabilitySet(),
-		CapDacRead:     process.IsDacReadCapabilitySet(),
-		CapDacOverride: process.IsDacOverrideCapabilitySet(),
+		Pid:  m.pid,
+		Uid:  m.uid,
+		Gid:  m.gid,
+		Root: m.root,
+		Cwd:  m.cwd,
+		// CapSysAdmin:    process.IsSysAdminCapabilitySet(),
+		// CapDacRead:     process.IsDacReadCapabilitySet(),
+		// CapDacOverride: process.IsDacOverrideCapabilitySet(),
+		Capabilities: process.GetEffCaps(),
 	}
 
 	payload[0].FsBlob = m.FsBlob

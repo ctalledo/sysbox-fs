@@ -64,23 +64,27 @@ var AllNSsButUser = []NStype{
 // by nsenterEvent class.
 //
 const (
-	LookupRequest         NSenterMsgType = "lookupRequest"
-	LookupResponse        NSenterMsgType = "lookupResponse"
-	OpenFileRequest       NSenterMsgType = "OpenFileRequest"
-	OpenFileResponse      NSenterMsgType = "OpenFileResponse"
-	ReadFileRequest       NSenterMsgType = "readFileRequest"
-	ReadFileResponse      NSenterMsgType = "readFileResponse"
-	WriteFileRequest      NSenterMsgType = "writeFileRequest"
-	WriteFileResponse     NSenterMsgType = "writeFileResponse"
-	ReadDirRequest        NSenterMsgType = "readDirRequest"
-	ReadDirResponse       NSenterMsgType = "readDirResponse"
-	SetAttrRequest        NSenterMsgType = "setAttrRequest"
-	SetAttrResponse       NSenterMsgType = "setAttrResponse"
-	MountSyscallRequest   NSenterMsgType = "mountSyscallRequest"
-	MountSyscallResponse  NSenterMsgType = "mountSyscallResponse"
-	UmountSyscallRequest  NSenterMsgType = "umountSyscallRequest"
-	UmountSyscallResponse NSenterMsgType = "umountSyscallResponse"
-	ErrorResponse         NSenterMsgType = "errorResponse"
+	LookupRequest          NSenterMsgType = "lookupRequest"
+	LookupResponse         NSenterMsgType = "lookupResponse"
+	OpenFileRequest        NSenterMsgType = "OpenFileRequest"
+	OpenFileResponse       NSenterMsgType = "OpenFileResponse"
+	ReadFileRequest        NSenterMsgType = "readFileRequest"
+	ReadFileResponse       NSenterMsgType = "readFileResponse"
+	WriteFileRequest       NSenterMsgType = "writeFileRequest"
+	WriteFileResponse      NSenterMsgType = "writeFileResponse"
+	ReadDirRequest         NSenterMsgType = "readDirRequest"
+	ReadDirResponse        NSenterMsgType = "readDirResponse"
+	SetAttrRequest         NSenterMsgType = "setAttrRequest"
+	SetAttrResponse        NSenterMsgType = "setAttrResponse"
+	MountSyscallRequest    NSenterMsgType = "mountSyscallRequest"
+	MountSyscallResponse   NSenterMsgType = "mountSyscallResponse"
+	UmountSyscallRequest   NSenterMsgType = "umountSyscallRequest"
+	UmountSyscallResponse  NSenterMsgType = "umountSyscallResponse"
+	MknodSyscallRequest    NSenterMsgType = "mknodSyscallRequest"
+	MknodSyscallResponse   NSenterMsgType = "mknodSyscallResponse"
+	MknodatSyscallRequest  NSenterMsgType = "mknodatSyscallRequest"
+	MknodatSyscallResponse NSenterMsgType = "mknodatSyscallResponse"
+	ErrorResponse          NSenterMsgType = "errorResponse"
 )
 
 //
@@ -132,14 +136,15 @@ type NSenterMessage struct {
 }
 
 type NSenterMsgHeader struct {
-	Pid            uint32 `json:"pid"`
-	Uid            uint32 `json:"uid"`
-	Gid            uint32 `json:"gid"`
-	Root           string `json:"root"`
-	Cwd            string `json:"cwd"`
-	CapSysAdmin    bool   `json:"capAdmin"`
-	CapDacRead     bool   `json:"capDacRead"`
-	CapDacOverride bool   `json:"capDacOverride"`
+	Pid          uint32   `json:"pid"`
+	Uid          uint32   `json:"uid"`
+	Gid          uint32   `json:"gid"`
+	Root         string   `json:"root"`
+	Cwd          string   `json:"cwd"`
+	Capabilities []uint32 `json:"capabilities"`
+	// CapSysAdmin    bool     `json:"capAdmin"`
+	// CapDacRead     bool     `json:"capDacRead"`
+	// CapDacOverride bool     `json:"capDacOverride"`
 }
 
 type LookupPayload struct {
@@ -188,4 +193,11 @@ type OverlayfsBlob struct {
 	UpperDir string `json:"-"`
 	WorkDir  string `json:"workdir"`
 	MergeDir string `json:"-"`
+}
+
+type MknodSyscallPayload struct {
+	Header NSenterMsgHeader
+	Path   string `json:"path"`
+	Mode   uint32 `json:"uint32"`
+	Dev    uint64 `json:"uint64"`
 }

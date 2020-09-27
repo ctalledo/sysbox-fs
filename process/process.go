@@ -117,6 +117,26 @@ func (p *process) IsDacOverrideCapabilitySet() bool {
 	return p.isCapabilitySet(cap.EFFECTIVE, cap.CAP_DAC_OVERRIDE)
 }
 
+func (p *process) GetEffCaps() []uint32 {
+	if p.cap == nil {
+		if err := p.initCapability(); err != nil {
+			return nil
+		}
+	}
+
+	return p.cap.GetEffCaps()
+}
+
+func (p *process) SetEffCaps(caps []uint32) {
+	if p.cap == nil {
+		if err := p.initCapability(); err != nil {
+			return
+		}
+	}
+
+	p.cap.SetEffCaps(caps)
+}
+
 // Simple wrapper method to set capability values.
 func (p *process) setCapability(which cap.CapType, what ...cap.Cap) {
 
@@ -168,9 +188,10 @@ func (p *process) initCapability() error {
 func (p *process) Camouflage(
 	uid uint32,
 	gid uint32,
-	capSysAdmin bool,
-	capDacRead bool,
-	capDacOverride bool) error {
+	caps []uint32) error {
+	// capSysAdmin bool,
+	// capDacRead bool,
+	// capDacOverride bool) error {
 
 	var capChangeRequired bool = false
 
@@ -185,18 +206,18 @@ func (p *process) Camouflage(
 	// running process accordingly.
 	if uid == 0 {
 
-		if !capSysAdmin {
-			p.cap.Unset(cap.EFFECTIVE, cap.CAP_SYS_ADMIN)
-			capChangeRequired = true
-		}
-		if !capDacRead {
-			p.cap.Unset(cap.EFFECTIVE, cap.CAP_DAC_READ_SEARCH)
-			capChangeRequired = true
-		}
-		if !capDacOverride {
-			p.cap.Unset(cap.EFFECTIVE, cap.CAP_DAC_OVERRIDE)
-			capChangeRequired = true
-		}
+		// if !capSysAdmin {
+		// 	p.cap.Unset(cap.EFFECTIVE, cap.CAP_SYS_ADMIN)
+		// 	capChangeRequired = true
+		// }
+		// if !capDacRead {
+		// 	p.cap.Unset(cap.EFFECTIVE, cap.CAP_DAC_READ_SEARCH)
+		// 	capChangeRequired = true
+		// }
+		// if !capDacOverride {
+		// 	p.cap.Unset(cap.EFFECTIVE, cap.CAP_DAC_OVERRIDE)
+		// 	capChangeRequired = true
+		// }
 
 		if capChangeRequired {
 			if err := p.cap.Apply(
@@ -227,30 +248,35 @@ func (p *process) Camouflage(
 		return err
 	}
 
-	if capSysAdmin || capDacRead || capDacOverride {
-
-		p.cap.Clear(cap.EFFECTIVE)
-
-		if capSysAdmin {
-			p.cap.Set(cap.EFFECTIVE, cap.CAP_SYS_ADMIN)
-			capChangeRequired = true
-		}
-		if capDacRead {
-			p.cap.Set(cap.EFFECTIVE, cap.CAP_DAC_READ_SEARCH)
-			capChangeRequired = true
-		}
-		if capDacOverride {
-			p.cap.Set(cap.EFFECTIVE, cap.CAP_DAC_OVERRIDE)
-			capChangeRequired = true
-		}
-
-		if capChangeRequired {
-			if err := p.cap.Apply(
-				cap.EFFECTIVE | cap.PERMITTED | cap.INHERITABLE); err != nil {
-				return err
-			}
-		}
+	p.cap.Fill(cap.EFFECTIVE)
+	if err := p.cap.Apply(
+		cap.EFFECTIVE | cap.PERMITTED | cap.INHERITABLE); err != nil {
+		return err
 	}
+	// if capSysAdmin || capDacRead || capDacOverride {
+
+	// 	p.cap.Clear(cap.EFFECTIVE)
+
+	// 	if capSysAdmin {
+	// 		p.cap.Set(cap.EFFECTIVE, cap.CAP_SYS_ADMIN)
+	// 		capChangeRequired = true
+	// 	}
+	// 	if capDacRead {
+	// 		p.cap.Set(cap.EFFECTIVE, cap.CAP_DAC_READ_SEARCH)
+	// 		capChangeRequired = true
+	// 	}
+	// 	if capDacOverride {
+	// 		p.cap.Set(cap.EFFECTIVE, cap.CAP_DAC_OVERRIDE)
+	// 		capChangeRequired = true
+	// 	}
+
+	// 	if capChangeRequired {
+	// 		if err := p.cap.Apply(
+	// 			cap.EFFECTIVE | cap.PERMITTED | cap.INHERITABLE); err != nil {
+	// 			return err
+	// 		}
+	// 	}
+	// }
 
 	return nil
 }

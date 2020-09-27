@@ -46,6 +46,8 @@ var monitoredSyscalls = []string{
 	"reboot",
 	"swapon",
 	"swapoff",
+	"mknod",
+	"mknodat",
 }
 
 // Seccomp's syscall-monitoring/trapping service struct. External packages
@@ -321,6 +323,12 @@ func (t *syscallTracer) process(
 	case "umount2":
 		resp, err = t.processUmount(req, fd, cntr)
 
+	case "mknod":
+		resp, err = t.processMknod(req, fd, cntr)
+
+	case "mknodat":
+		resp, err = t.processMknodAt(req, fd, cntr)
+
 	case "reboot":
 		resp, err = t.processReboot(req, fd, cntr)
 
@@ -483,6 +491,133 @@ func (t *syscallTracer) processUmount(
 
 	// Process umount syscall.
 	return umount.process()
+}
+
+func (t *syscallTracer) processMknod(
+	req *sysRequest,
+	fd int32,
+	cntr domain.ContainerIface) (*sysResponse, error) {
+
+	logrus.Debugf("Received mknod syscall from pid %d", req.Pid)
+
+	argPtrs := []uint64{
+		req.Data.Args[0],
+	}
+	args, err := t.processMemParse(req.Pid, argPtrs)
+	if err != nil {
+		return nil, err
+	}
+
+	mknod := &mknodSyscallInfo{
+		syscallCtx: syscallCtx{
+			syscallNum: int32(req.Data.Syscall),
+			reqId:      req.Id,
+			pid:        req.Pid,
+			cntr:       cntr,
+			tracer:     t,
+		},
+		MknodSyscallPayload: &domain.MknodSyscallPayload{
+			Path: args[0],
+			Mode: uint32(req.Data.Args[1]),
+			Dev:  req.Data.Args[2],
+		},
+	}
+
+	logrus.Debug(mknod)
+
+	// As per man's capabilities(7), cap_sys_admin capability is required for
+	// mount operations. Otherwise, return here and let kernel handle the mount
+	// instruction.
+	process := t.sms.prs.ProcessCreate(req.Pid, 0, 0)
+	if !(process.IsSysAdminCapabilitySet()) {
+		return t.createErrorResponse(req.Id, syscall.EPERM), nil
+	}
+
+	// Resolve mount target and verify that process has the proper rights to
+	// access each of the components of the path.
+	// err = process.PathAccess(mount.Target, 0)
+	// if err != nil {
+	// 	return t.createErrorResponse(req.Id, err), nil
+	// }
+
+	// To simplify mount processing logic, convert to absolute path if dealing
+	// with a relative path request.
+	// if !filepath.IsAbs(mount.Target) {
+	// 	mount.Target = filepath.Join(mount.cwd, mount.Target)
+	// }
+
+	// Collect process attributes required for mount execution.
+	mknod.uid = process.Uid()
+	mknod.gid = process.Gid()
+	mknod.cwd = process.Cwd()
+	mknod.root = process.Root()
+
+	// Process mount syscall.
+	return mknod.process()
+}
+
+func (t *syscallTracer) processMknodAt(
+	req *sysRequest,
+	fd int32,
+	cntr domain.ContainerIface) (*sysResponse, error) {
+
+	logrus.Debugf("Received mknodat syscall from pid %d", req.Pid)
+
+	argPtrs := []uint64{
+		req.Data.Args[0],
+		req.Data.Args[1],
+	}
+	args, err := t.processMemParse(req.Pid, argPtrs)
+	if err != nil {
+		return nil, err
+	}
+
+	mknod := &mknodSyscallInfo{
+		syscallCtx: syscallCtx{
+			syscallNum: int32(req.Data.Syscall),
+			reqId:      req.Id,
+			pid:        req.Pid,
+			cntr:       cntr,
+			tracer:     t,
+		},
+		MknodSyscallPayload: &domain.MknodSyscallPayload{
+			Path: args[0],
+			Mode: uint32(req.Data.Args[2]),
+			Dev:  req.Data.Args[3],
+		},
+	}
+
+	logrus.Debug(mknod)
+
+	// As per man's capabilities(7), cap_sys_admin capability is required for
+	// mount operations. Otherwise, return here and let kernel handle the mount
+	// instruction.
+	process := t.sms.prs.ProcessCreate(req.Pid, 0, 0)
+	if !(process.IsSysAdminCapabilitySet()) {
+		return t.createErrorResponse(req.Id, syscall.EPERM), nil
+	}
+
+	// Resolve mount target and verify that process has the proper rights to
+	// access each of the components of the path.
+	// err = process.PathAccess(mount.Target, 0)
+	// if err != nil {
+	// 	return t.createErrorResponse(req.Id, err), nil
+	// }
+
+	// To simplify mount processing logic, convert to absolute path if dealing
+	// with a relative path request.
+	// if !filepath.IsAbs(mount.Target) {
+	// 	mount.Target = filepath.Join(mount.cwd, mount.Target)
+	// }
+
+	// Collect process attributes required for mount execution.
+	mknod.uid = process.Uid()
+	mknod.gid = process.Gid()
+	mknod.cwd = process.Cwd()
+	mknod.root = process.Root()
+
+	// Process mount syscall.
+	return mknod.process()
 }
 
 func (t *syscallTracer) processReboot(

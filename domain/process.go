@@ -46,12 +46,15 @@ type ProcessIface interface {
 	UserNsInodeParent() (Inode, error)
 	CreateNsInodes(Inode) error
 	PathAccess(path string, accessFlags AccessMode) error
+	GetEffCaps() []uint32
+	SetEffCaps(caps []uint32)
 	Camouflage(
 		uid uint32,
 		gid uint32,
-		capSysAdmin bool,
-		capDacRead bool,
-		capDacOverride bool) error
+		caps []uint32) error
+	// capSysAdmin bool,
+	// capDacRead bool,
+	// capDacOverride bool) error
 }
 
 type ProcessServiceIface interface {

@@ -645,29 +645,30 @@ func (e *NSenterEvent) processMountSyscallRequest() error {
 	payload := e.ReqMsg.Payload.([]domain.MountSyscallPayload)
 
 	if payload[0].FsType == "overlay" {
-		// // Create a 'process' struct to represent the 'sysbox-fs nsenter' process
-		// // executing this logic.
-		// process := e.service.prs.ProcessCreate(0, 0, 0)
+		// Create a 'process' struct to represent the 'sysbox-fs nsenter' process
+		// executing this logic.
+		process := e.service.prs.ProcessCreate(0, 0, 0)
 
-		// // Extract payload-header from the first element of the payload slice.
+		// Extract payload-header from the first element of the payload slice.
 		header := payload[0].Header
 
-		// // Adjust 'nsenter' process personality to the end-user's original process.
-		// if err := process.Camouflage(
-		// 	header.Uid,
-		// 	header.Gid,
-		// 	header.CapSysAdmin,
-		// 	header.CapDacRead,
-		// 	header.CapDacOverride); err != nil {
+		// Adjust 'nsenter' process personality to the end-user's original process.
+		if err := process.Camouflage(
+			header.Uid,
+			header.Gid,
+			header.Capabilities); err != nil {
+			//header.CapSysAdmin,
+			//header.CapDacRead,
+			//header.CapDacOverride)
 
-		// 	// Send an error-message response.
-		// 	e.ResMsg = &domain.NSenterMessage{
-		// 		Type:    domain.ErrorResponse,
-		// 		Payload: &fuse.IOerror{RcvError: err},
-		// 	}
+			// Send an error-message response.
+			e.ResMsg = &domain.NSenterMessage{
+				Type:    domain.ErrorResponse,
+				Payload: &fuse.IOerror{RcvError: err},
+			}
 
-		// 	return nil
-		// }
+			return nil
+		}
 
 		os.Chdir(header.Cwd)
 	}
@@ -686,9 +687,9 @@ func (e *NSenterEvent) processMountSyscallRequest() error {
 		}
 
 		// Process fs-specific blob.
-		if err = e.processFsBlobMount(&payload[i]); err != nil {
-			break
-		}
+		// if err = e.processFsBlobMount(&payload[i]); err != nil {
+		// 	break
+		// }
 	}
 
 	if err != nil {
@@ -756,6 +757,34 @@ func (e *NSenterEvent) processUmountSyscallRequest() error {
 	// Create success response message.
 	e.ResMsg = &domain.NSenterMessage{
 		Type:    domain.UmountSyscallResponse,
+		Payload: "",
+	}
+
+	return nil
+}
+
+func (e *NSenterEvent) processMknodSyscallRequest() error {
+
+	payload := e.ReqMsg.Payload.(domain.MknodSyscallPayload)
+
+	err := unix.Mknod(
+		payload.Path,
+		payload.Mode,
+		int(payload.Dev),
+	)
+	if err != nil {
+		// Create error response msg.
+		e.ResMsg = &domain.NSenterMessage{
+			Type:    domain.ErrorResponse,
+			Payload: &fuse.IOerror{RcvError: err},
+		}
+
+		return nil
+	}
+
+	// Create success response message.
+	e.ResMsg = &domain.NSenterMessage{
+		Type:    domain.MountSyscallResponse,
 		Payload: "",
 	}
 
@@ -915,6 +944,23 @@ func (e *NSenterEvent) processRequest(pipe io.Reader) error {
 		}
 
 		return e.processUmountSyscallRequest()
+
+	case domain.MknodSyscallRequest:
+		var p domain.MknodSyscallPayload
+		if payload != nil {
+			err := json.Unmarshal(payload, &p)
+			if err != nil {
+				logrus.Error(err)
+				return err
+			}
+		}
+
+		e.ReqMsg = &domain.NSenterMessage{
+			Type:    nsenterMsg.Type,
+			Payload: p,
+		}
+
+		return e.processMknodSyscallRequest()
 
 	default:
 		e.ResMsg = &domain.NSenterMessage{
