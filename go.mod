@@ -4,11 +4,13 @@ go 1.13
 
 require (
 	bazil.org/fuse v0.0.0-20180421153158-65cc252bf669
+	github.com/elastic/gosigar v0.13.0
 	github.com/nestybox/sysbox-ipc v0.0.0-00010101000000-000000000000
 	github.com/nestybox/sysbox-libs/capability v0.0.0-00010101000000-000000000000
 	github.com/nestybox/sysbox-libs/dockerUtils v0.0.0-00010101000000-000000000000
 	github.com/nestybox/sysbox-libs/libseccomp-golang v0.0.0-00010101000000-000000000000
 	github.com/nestybox/sysbox-libs/pidmonitor v0.0.0-00010101000000-000000000000
+	github.com/nestybox/sysbox-libs/utils v0.0.0-00010101000000-000000000000
 	github.com/nestybox/sysbox-runc v0.0.0-00010101000000-000000000000
 	github.com/pkg/profile v1.4.0
 	github.com/sirupsen/logrus v1.4.2

@@ -25,10 +25,11 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/elastic/gosigar/psnotify"
 	"github.com/nestybox/sysbox-fs/domain"
 	unixIpc "github.com/nestybox/sysbox-ipc/unix"
 	libseccomp "github.com/nestybox/sysbox-libs/libseccomp-golang"
-	"github.com/nestybox/sysbox-libs/pidmonitor"
+	utils "github.com/nestybox/sysbox-libs/utils"
 
 	"github.com/sirupsen/logrus"
 )
@@ -51,8 +52,11 @@ var monitoredSyscalls = []string{
 	"fchownat",
 }
 
+//
 // Seccomp's syscall-monitoring/trapping service struct. External packages
 // will solely rely on this struct for their syscall-monitoring demands.
+//
+
 type SyscallMonitorService struct {
 	nss    domain.NSenterServiceIface        // for nsenter functionality requirements
 	css    domain.ContainerStateServiceIface // for container-state interactions
@@ -86,13 +90,62 @@ func (scs *SyscallMonitorService) Setup(
 	}
 }
 
+//
 // SeccompSession holds state associated to every seccomp tracee session.
+//
+
 type seccompSession struct {
 	pid uint32 // pid of the tracee process
 	fd  int32  // tracee's seccomp-fd to allow kernel interaction
 }
 
+//
+// seccompFdPidMap tracks alls processes associated with a given seccomp notify
+// file descriptor (i.e., the original tracee plus all it's descendant processes)
+//
+
+type seccompFdPidMap struct {
+	m map[int][]int // fd -> list of pids
+}
+
+func newSeccompFdPidMap() *seccompFdPidMap {
+	return &seccompFdPidMap{
+		m: make(map[int][]int),
+	}
+}
+
+func (sfp *seccompFdPidMap) Add(fd int32, pid uint32) {
+	sfp.m[int(fd)] = append(sfp.m[int(fd)], int(pid))
+}
+
+// Removes the given pid from the list of pids for fd. If the list becomes empty,
+// the fd is removed from the map and return value "fdHasNoPids" is set to true.
+func (sfp *seccompFdPidMap) Remove(fd int32, pid uint32) (bool, bool) {
+	fdi := int(fd)
+
+	pids, ok := sfp.m[fdi]
+	if !ok {
+		return false, false
+	}
+
+	if !utils.IntSliceContains(pids, int(pid)) {
+		return false, false
+	}
+
+	pids = utils.IntSliceRemove(pids, []int{int(pid)})
+	if len(pids) == 0 {
+		delete(sfp.m, fdi)
+		return true, true
+	}
+
+	sfp.m[fdi] = pids
+	return false, true
+}
+
+//
 // Seccomp's syscall-monitor/tracer.
+//
+
 type syscallTracer struct {
 	sms              *SyscallMonitorService            // backpointer to syscall-monitor service
 	srv              *unixIpc.Server                   // unix server listening to seccomp-notifs
@@ -177,53 +230,133 @@ func (t *syscallTracer) start() error {
 // method runs within its own execution context.
 func (t *syscallTracer) sessionsMonitor() error {
 
-	// seccompSession DB to store 'tracees' relevant information.
-	var seccompSessionMap = make(map[uint32]seccompSession)
+	// Maps each process to it's associated seccomp notify fd; each process is
+	// associated with exactly one fd
+	seccompSessionMap := make(map[uint32]int32)
 
-	// Launch pidmonitor task at 100ms sampling rate.
-	pm, err := pidmonitor.New(&pidmonitor.Cfg{100})
+	// Maps each seccomp notify fd to the list of associated processeses; an fd
+	// is associated with a process and all its descendants.
+	seccompFdMap := newSeccompFdPidMap()
+
+	// pm is a process event monitor; it tracks process forks and removal events.
+	pm, err := psnotify.NewWatcher()
 	if err != nil {
-		logrus.Error("Could not initialize pidMonitor logic")
+		logrus.Error("Could not initialize pid monitor: %s", err)
 		return err
 	}
 	defer pm.Close()
 
 	for {
+
+		// XXX: DEBUG
+		logrus.Infof("seccompSessionMap: %v", seccompSessionMap)
+		logrus.Infof("seccompFdMap: %v", seccompFdMap)
+
 		select {
-		// syscall tracee additions
+
 		case elem := <-t.seccompSessionCh:
+			// Trace syscalls on a new process
 
-			logrus.Debugf("Received 'create' notification for seccomp-tracee: %v", elem)
+			logrus.Infof("Received 'add' notification for seccomp-tracee: %v", elem)
 
-			seccompSessionMap[elem.pid] = elem
-			pm.AddEvent([]pidmonitor.PidEvent{
-				pidmonitor.PidEvent{
-					Pid:   elem.pid,
-					Event: pidmonitor.Exit,
-					Err:   nil,
-				},
-			})
+			if err := pm.Watch(int(elem.pid), psnotify.PROC_EVENT_FORK|psnotify.PROC_EVENT_EXIT); err != nil {
 
-		// syscall tracee deletions
-		case pidList := <-pm.EventCh:
+				// TODO: this error needs to be notified to whomever sent the
+				// elem.pid via the seccompSessionCh; ideally that goes back to
+				// sysbox-runc which fails the operation.
 
-			logrus.Debugf("Received 'delete' notification for seccomp-tracee: %v", pidList)
+				logrus.Errorf("Failed to add process monitor for pid %d; syscall interception won't work for that process.", elem.pid)
+			}
 
-			for _, pidEvent := range pidList {
-				elem, ok := seccompSessionMap[pidEvent.Pid]
-				if !ok {
-					logrus.Errorf("Unexpected error: file-descriptor not found for pid %d",
-						pidEvent.Pid)
-					continue
+			seccompSessionMap[elem.pid] = elem.fd
+			seccompFdMap.Add(elem.fd, elem.pid)
+
+		case ev := <-pm.Fork:
+
+			// The process monitor indicates a fork event. This may indicate an
+			// actual fork (a new child process) or a reparenting of a child
+			// process to another parent. For the former case, we track the new
+			// child. For the latter, the child is already tracked, so nothing to
+			// do. We can tell if a child process reparented when we find the child
+			// in the seccompSessionMap (i.e., it's not a new child).
+
+			logrus.Infof("Received 'fork' notification for seccomp-tracee: %v", ev)
+
+			if _, reparented := seccompSessionMap[uint32(ev.ChildPid)]; reparented {
+				continue
+			}
+
+			pFd, ok := seccompSessionMap[uint32(ev.ParentPid)]
+			if !ok {
+				logrus.Errorf("Unexpected error: file-descriptor not found for (parent) pid %d", ev.ParentPid)
+				continue
+			}
+
+			if err := pm.Watch(ev.ChildPid, psnotify.PROC_EVENT_FORK|psnotify.PROC_EVENT_EXIT); err != nil {
+				// TODO: handle this error correctly
+				logrus.Errorf("Failed to add process monitor for pid %d; syscall interception won't work for that process.", ev.ChildPid)
+				continue
+			}
+
+			cElem := seccompSession{
+				pid: uint32(ev.ChildPid),
+				fd:  pFd,
+			}
+
+			seccompSessionMap[cElem.pid] = cElem.fd
+			seccompFdMap.Add(cElem.fd, cElem.pid)
+
+		case ev := <-pm.Exit:
+			// Remove pid from syscall tracee list
+			logrus.Infof("Received 'delete' notification for seccomp-tracee: %v", ev.Pid)
+
+			// Sometimes we get an exit event when the process hasn't really exited
+			// but only reparented. Here we check if the process did indeed exit.
+
+			// HERE: how come we are not exiting on all the intermediate processes spawned by Docker inside the container? do we need to wait sometime here?
+			// ALSO: do we need to track all children? or can we just track the first child, to deal with the docker exec & case?
+
+			pidExists, err := pidExists(ev.Pid)
+			if err == nil && pidExists {
+				logrus.Infof("Ignoring 'delete' notification for seccomp-tracee: %v (process continues to exist)", ev.Pid)
+
+				if err := pm.Watch(ev.Pid, psnotify.PROC_EVENT_FORK|psnotify.PROC_EVENT_EXIT); err != nil {
+					// TODO: handle this error correctly
+					logrus.Errorf("Failed to add process monitor for pid %d; syscall interception won't work for that process.", ev.Pid)
 				}
 
-				if err := syscall.Close(int(elem.fd)); err != nil {
+				continue
+
+			} else if err != nil {
+				logrus.Errorf("Unexpected error: failed to check if process %d exists: %v; will assume it doesn't exist", ev.Pid, err)
+			}
+
+			logrus.Infof("Deleting seccomp notification fd for seccomp-tracee: %v", ev.Pid)
+
+			fd, ok := seccompSessionMap[uint32(ev.Pid)]
+			if !ok {
+				logrus.Errorf("Unexpected error: file-descriptor not found for pid %d", ev.Pid)
+				continue
+			}
+
+			delete(seccompSessionMap, uint32(ev.Pid))
+
+			fdHasNoPids, ok := seccompFdMap.Remove(fd, uint32(ev.Pid))
+			if !ok {
+				logrus.Errorf("Unexpected error: pid %v not found in list for fd %v", ev.Pid, fd)
+				continue
+			}
+
+			if fdHasNoPids {
+				if err := syscall.Close(int(fd)); err != nil {
 					logrus.Fatal(err)
 				}
-				delete(seccompSessionMap, pidEvent.Pid)
-
-				t.pollsrv.StopWait(elem.fd)
+				t.pollsrv.StopWait(fd)
 			}
+
+		case err := <-pm.Error:
+			// TODO: deal with process monitor errors
+			logrus.Errorf("Received 'error' notification for seccomp-tracee: %s", err)
 		}
 	}
 
@@ -240,7 +373,7 @@ func (t *syscallTracer) connHandler(c *net.UnixConn) error {
 		return err
 	}
 
-	logrus.Debugf("seccompTracer connection on fd %d from pid %d cntrId %s",
+	logrus.Infof("seccompTracer connection on fd %d from pid %d cntrId %s",
 		fd, pid, cntrID)
 
 	// Send seccompSession details to parent monitor-service for tracking purposes.
@@ -256,7 +389,7 @@ func (t *syscallTracer) connHandler(c *net.UnixConn) error {
 		// Return here to exit this goroutine in case of error as that
 		// implies that seccomp-fd is not valid anymore.
 		if err := t.pollsrv.StartWaitRead(fd); err != nil {
-			logrus.Debugf("Seccomp-fd i/o error returned (%v). Exiting seccomp-tracer processing on fd %d pid %d",
+			logrus.Infof("Seccomp-fd i/o error returned (%v). Exiting seccomp-tracer processing on fd %d pid %d",
 				err, fd, pid)
 			return err
 		}
@@ -376,7 +509,7 @@ func (t *syscallTracer) processMount(
 	fd int32,
 	cntr domain.ContainerIface) (*sysResponse, error) {
 
-	logrus.Debugf("Received mount syscall from pid %d", req.Pid)
+	logrus.Infof("Received mount syscall from pid %d", req.Pid)
 
 	argPtrs := []uint64{
 		req.Data.Args[0],
@@ -406,7 +539,7 @@ func (t *syscallTracer) processMount(
 		},
 	}
 
-	logrus.Debug(mount)
+	logrus.Info(mount)
 
 	// cap_sys_admin capability is required for mount operations.
 	process := t.sms.prs.ProcessCreate(req.Pid, 0, 0)
@@ -442,7 +575,7 @@ func (t *syscallTracer) processUmount(
 	fd int32,
 	cntr domain.ContainerIface) (*sysResponse, error) {
 
-	logrus.Debugf("Received umount syscall from pid %d", req.Pid)
+	logrus.Infof("Received umount syscall from pid %d", req.Pid)
 
 	argPtrs := []uint64{req.Data.Args[0]}
 	args, err := t.processMemParse(req.Pid, argPtrs)
@@ -464,7 +597,7 @@ func (t *syscallTracer) processUmount(
 		},
 	}
 
-	logrus.Debug(umount)
+	logrus.Info(umount)
 
 	// As per man's capabilities(7), cap_sys_admin capability is required for
 	// umount operations. Otherwise, return here and let kernel handle the mount
