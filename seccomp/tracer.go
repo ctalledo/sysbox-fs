@@ -29,7 +29,7 @@ import (
 	"github.com/nestybox/sysbox-fs/domain"
 	unixIpc "github.com/nestybox/sysbox-ipc/unix"
 	libseccomp "github.com/nestybox/sysbox-libs/libseccomp-golang"
-	utils "github.com/nestybox/sysbox-libs/utils"
+	"github.com/nestybox/sysbox-libs/pidmonitor"
 
 	"github.com/sirupsen/logrus"
 )
@@ -97,49 +97,6 @@ func (scs *SyscallMonitorService) Setup(
 type seccompSession struct {
 	pid uint32 // pid of the tracee process
 	fd  int32  // tracee's seccomp-fd to allow kernel interaction
-}
-
-//
-// seccompFdPidMap tracks alls processes associated with a given seccomp notify
-// file descriptor (i.e., the original tracee plus all it's descendant processes)
-//
-
-type seccompFdPidMap struct {
-	m map[int][]int // fd -> list of pids
-}
-
-func newSeccompFdPidMap() *seccompFdPidMap {
-	return &seccompFdPidMap{
-		m: make(map[int][]int),
-	}
-}
-
-func (sfp *seccompFdPidMap) Add(fd int32, pid uint32) {
-	sfp.m[int(fd)] = append(sfp.m[int(fd)], int(pid))
-}
-
-// Removes the given pid from the list of pids for fd. If the list becomes empty,
-// the fd is removed from the map and return value "fdHasNoPids" is set to true.
-func (sfp *seccompFdPidMap) Remove(fd int32, pid uint32) (bool, bool) {
-	fdi := int(fd)
-
-	pids, ok := sfp.m[fdi]
-	if !ok {
-		return false, false
-	}
-
-	if !utils.IntSliceContains(pids, int(pid)) {
-		return false, false
-	}
-
-	pids = utils.IntSliceRemove(pids, []int{int(pid)})
-	if len(pids) == 0 {
-		delete(sfp.m, fdi)
-		return true, true
-	}
-
-	sfp.m[fdi] = pids
-	return false, true
 }
 
 //
@@ -224,27 +181,42 @@ func (t *syscallTracer) start() error {
 	return nil
 }
 
-// Method keeps track of all the 'tracee' processes served by a syscall tracer.
-// From a functional standpoint, this routine acts as a garbage-collector for
-// this class. Note that no concurrency management is needed here as this
-// method runs within its own execution context.
+// sessionsMonitor keeps track of all the 'tracee' processes served by a syscall
+// tracer. When it detects there are no processes served (e.g., all of them
+// died), it removes the associated tracer. The sessions monitor is capable of
+// tracing process forks for all tracee processes, such that syscall trapping
+// can remain active on all child processes, even if the parent processes die.
+//
+// Note that no concurrency management is needed here as this method runs within
+// its own execution context.
 func (t *syscallTracer) sessionsMonitor() error {
 
 	// Maps each process to it's associated seccomp notify fd; each process is
-	// associated with exactly one fd
+	// associated with exactly one fd.
 	seccompSessionMap := make(map[uint32]int32)
 
-	// Maps each seccomp notify fd to the list of associated processeses; an fd
-	// is associated with a process and all its descendants.
-	seccompFdMap := newSeccompFdPidMap()
+	// Maps each seccomp notify fd to the number of processes associated with it
+	// (i.e., the fd's reference count).
+	seccompFdMap := make(map[int32]int)
 
-	// pm is a process event monitor; it tracks process forks and removal events.
-	pm, err := psnotify.NewWatcher()
+	// pidForkMon tracks process forks events.
+	pidForkMon, err := psnotify.NewWatcher()
 	if err != nil {
-		logrus.Error("Could not initialize pid monitor: %s", err)
+		logrus.Error("Failed to initialize pid monitor: %s", err)
 		return err
 	}
-	defer pm.Close()
+	defer pidForkMon.Close()
+
+	// pidExitMon tracks process exit events; we would ideally use psnotify for
+	// this, but we've found out that it misses exit events when they occur
+	// very soon (microseconds) after the process is created. Thus we use our own
+	// pidmonitor, which does not suffer from this problem.
+	pidExitMon, err := pidmonitor.New(&pidmonitor.Cfg{100})
+	if err != nil {
+		logrus.Error("Failed to initialize pid exit monitor: %s", err)
+		return err
+	}
+	defer pidExitMon.Close()
 
 	for {
 
@@ -259,7 +231,7 @@ func (t *syscallTracer) sessionsMonitor() error {
 
 			logrus.Infof("Received 'add' notification for seccomp-tracee: %v", elem)
 
-			if err := pm.Watch(int(elem.pid), psnotify.PROC_EVENT_FORK|psnotify.PROC_EVENT_EXIT); err != nil {
+			if err := pidForkMon.Watch(int(elem.pid), psnotify.PROC_EVENT_ALL); err != nil {
 
 				// TODO: this error needs to be notified to whomever sent the
 				// elem.pid via the seccompSessionCh; ideally that goes back to
@@ -268,17 +240,27 @@ func (t *syscallTracer) sessionsMonitor() error {
 				logrus.Errorf("Failed to add process monitor for pid %d; syscall interception won't work for that process.", elem.pid)
 			}
 
+			pidExitMon.AddEvent([]pidmonitor.PidEvent{
+				pidmonitor.PidEvent{
+					Pid:   elem.pid,
+					Event: pidmonitor.Exit,
+					Err:   nil,
+				},
+			})
+
 			seccompSessionMap[elem.pid] = elem.fd
-			seccompFdMap.Add(elem.fd, elem.pid)
+			seccompFdMap[elem.fd] = seccompFdMap[elem.fd] + 1
 
-		case ev := <-pm.Fork:
+		case ev := <-pidForkMon.Fork:
 
-			// The process monitor indicates a fork event. This may indicate an
-			// actual fork (a new child process) or a reparenting of a child
-			// process to another parent. For the former case, we track the new
-			// child. For the latter, the child is already tracked, so nothing to
-			// do. We can tell if a child process reparented when we find the child
-			// in the seccompSessionMap (i.e., it's not a new child).
+			// The pid fork monitor reported a fork event. This may indicate
+			// creation of a new child process or a new thread, or a reparenting of
+			// a child process to another parent (which is reported as a fork on
+			// the parent). For the new child process case, we track the new
+			// child. For the new thread or reparenting cases, we do nothing since
+			// the thread leader or reparented process is already tracked. We can
+			// tell among these cases by searching for the child pid on the
+			// seccompSessionMap (i.e., if found, it's not a new child process).
 
 			logrus.Infof("Received 'fork' notification for seccomp-tracee: %v", ev)
 
@@ -292,11 +274,19 @@ func (t *syscallTracer) sessionsMonitor() error {
 				continue
 			}
 
-			if err := pm.Watch(ev.ChildPid, psnotify.PROC_EVENT_FORK|psnotify.PROC_EVENT_EXIT); err != nil {
+			if err := pidForkMon.Watch(ev.ChildPid, psnotify.PROC_EVENT_FORK|psnotify.PROC_EVENT_EXIT); err != nil {
 				// TODO: handle this error correctly
 				logrus.Errorf("Failed to add process monitor for pid %d; syscall interception won't work for that process.", ev.ChildPid)
 				continue
 			}
+
+			pidExitMon.AddEvent([]pidmonitor.PidEvent{
+				pidmonitor.PidEvent{
+					Pid:   uint32(ev.ChildPid),
+					Event: pidmonitor.Exit,
+					Err:   nil,
+				},
+			})
 
 			cElem := seccompSession{
 				pid: uint32(ev.ChildPid),
@@ -304,59 +294,64 @@ func (t *syscallTracer) sessionsMonitor() error {
 			}
 
 			seccompSessionMap[cElem.pid] = cElem.fd
-			seccompFdMap.Add(cElem.fd, cElem.pid)
+			seccompFdMap[cElem.fd] = seccompFdMap[cElem.fd] + 1
 
-		case ev := <-pm.Exit:
-			// Remove pid from syscall tracee list
-			logrus.Infof("Received 'delete' notification for seccomp-tracee: %v", ev.Pid)
+		case pidList := <-pidExitMon.EventCh:
 
-			// Sometimes we get an exit event when the process hasn't really exited
-			// but only reparented. Here we check if the process did indeed exit.
+			logrus.Infof("Received 'delete' notification for seccomp-tracee(s): %v", pidList)
 
-			// HERE: how come we are not exiting on all the intermediate processes spawned by Docker inside the container? do we need to wait sometime here?
-			// ALSO: do we need to track all children? or can we just track the first child, to deal with the docker exec & case?
+			for _, ev := range pidList {
 
+				fd, ok := seccompSessionMap[uint32(ev.Pid)]
+				if !ok {
+					logrus.Errorf("Unexpected error: file-descriptor not found for pid %d", ev.Pid)
+					continue
+				}
+
+				delete(seccompSessionMap, uint32(ev.Pid))
+
+				numPids, ok := seccompFdMap[fd]
+				if !ok {
+					logrus.Errorf("Unexpected error: pid %v not found in list for fd %v", ev.Pid, fd)
+					continue
+				}
+
+				if numPids == 1 {
+					if err := syscall.Close(int(fd)); err != nil {
+						logrus.Fatal(err)
+					}
+					t.pollsrv.StopWait(fd)
+					delete(seccompFdMap, fd)
+				} else {
+					seccompFdMap[fd] = numPids - 1
+				}
+			}
+
+		case ev := <-pidForkMon.Exit:
+
+			// Check if process really did exit; if not, re-add it
 			pidExists, err := pidExists(ev.Pid)
 			if err == nil && pidExists {
-				logrus.Infof("Ignoring 'delete' notification for seccomp-tracee: %v (process continues to exist)", ev.Pid)
+				logrus.Infof("Received bogus 'exit' notification from pid fork monitor; re-watching.")
 
-				if err := pm.Watch(ev.Pid, psnotify.PROC_EVENT_FORK|psnotify.PROC_EVENT_EXIT); err != nil {
+				if err := pidForkMon.Watch(ev.Pid, psnotify.PROC_EVENT_ALL); err != nil {
 					// TODO: handle this error correctly
 					logrus.Errorf("Failed to add process monitor for pid %d; syscall interception won't work for that process.", ev.Pid)
 				}
-
 				continue
 
 			} else if err != nil {
 				logrus.Errorf("Unexpected error: failed to check if process %d exists: %v; will assume it doesn't exist", ev.Pid, err)
 			}
 
-			logrus.Infof("Deleting seccomp notification fd for seccomp-tracee: %v", ev.Pid)
+			logrus.Infof("Received 'exit' notification from pid fork monitor; ignoring.")
 
-			fd, ok := seccompSessionMap[uint32(ev.Pid)]
-			if !ok {
-				logrus.Errorf("Unexpected error: file-descriptor not found for pid %d", ev.Pid)
-				continue
-			}
+		case <-pidForkMon.Exec:
+			logrus.Infof("Received 'exec' notification form pid from monitor; ignoring.")
 
-			delete(seccompSessionMap, uint32(ev.Pid))
-
-			fdHasNoPids, ok := seccompFdMap.Remove(fd, uint32(ev.Pid))
-			if !ok {
-				logrus.Errorf("Unexpected error: pid %v not found in list for fd %v", ev.Pid, fd)
-				continue
-			}
-
-			if fdHasNoPids {
-				if err := syscall.Close(int(fd)); err != nil {
-					logrus.Fatal(err)
-				}
-				t.pollsrv.StopWait(fd)
-			}
-
-		case err := <-pm.Error:
+		case err := <-pidForkMon.Error:
 			// TODO: deal with process monitor errors
-			logrus.Errorf("Received 'error' notification for seccomp-tracee: %s", err)
+			logrus.Errorf("Received 'error' notification from pid fork monitor: %s", err)
 		}
 	}
 
