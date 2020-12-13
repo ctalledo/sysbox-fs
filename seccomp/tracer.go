@@ -199,18 +199,20 @@ func (t *syscallTracer) sessionsMonitor() error {
 	// (i.e., the fd's reference count).
 	seccompFdMap := make(map[int32]int)
 
-	// pidForkMon tracks process forks events.
-	pidForkMon, err := psnotify.NewWatcher()
+	// pm is the process monitor, used to track process events; we use it for
+	// tracking forks for seccomp notify fd tracees.
+	pm, err := psnotify.NewWatcher()
 	if err != nil {
-		logrus.Error("Failed to initialize pid monitor: %s", err)
+		logrus.Errorf("Failed to initialize pid monitor: %s", err)
 		return err
 	}
-	defer pidForkMon.Close()
+	defer pm.Close()
 
-	// pidExitMon tracks process exit events; we would ideally use psnotify for
-	// this, but we've found out that it misses exit events when they occur
-	// very soon (microseconds) after the process is created. Thus we use our own
-	// pidmonitor, which does not suffer from this problem.
+	// pidExitMon tracks process exit events; we would ideally use the process
+	// monitor (psnotify) for this, but we've found out that it misses exit
+	// events when they occur very soon (microseconds) after the process is
+	// created. Thus we use our own pidmonitor, which does not suffer from this
+	// problem.
 	pidExitMon, err := pidmonitor.New(&pidmonitor.Cfg{100})
 	if err != nil {
 		logrus.Error("Failed to initialize pid exit monitor: %s", err)
@@ -231,7 +233,7 @@ func (t *syscallTracer) sessionsMonitor() error {
 
 			logrus.Infof("Received 'add' notification for seccomp-tracee: %v", elem)
 
-			if err := pidForkMon.Watch(int(elem.pid), psnotify.PROC_EVENT_ALL); err != nil {
+			if err := pm.Watch(int(elem.pid), psnotify.PROC_EVENT_ALL); err != nil {
 
 				// TODO: this error needs to be notified to whomever sent the
 				// elem.pid via the seccompSessionCh; ideally that goes back to
@@ -251,9 +253,9 @@ func (t *syscallTracer) sessionsMonitor() error {
 			seccompSessionMap[elem.pid] = elem.fd
 			seccompFdMap[elem.fd] = seccompFdMap[elem.fd] + 1
 
-		case ev := <-pidForkMon.Fork:
+		case ev := <-pm.Fork:
 
-			// The pid fork monitor reported a fork event. This may indicate
+			// The process monitor reported a fork event. This may indicate
 			// creation of a new child process or a new thread, or a reparenting of
 			// a child process to another parent (which is reported as a fork on
 			// the parent). For the new child process case, we track the new
@@ -274,7 +276,7 @@ func (t *syscallTracer) sessionsMonitor() error {
 				continue
 			}
 
-			if err := pidForkMon.Watch(ev.ChildPid, psnotify.PROC_EVENT_FORK|psnotify.PROC_EVENT_EXIT); err != nil {
+			if err := pm.Watch(ev.ChildPid, psnotify.PROC_EVENT_ALL); err != nil {
 				// TODO: handle this error correctly
 				logrus.Errorf("Failed to add process monitor for pid %d; syscall interception won't work for that process.", ev.ChildPid)
 				continue
@@ -327,14 +329,14 @@ func (t *syscallTracer) sessionsMonitor() error {
 				}
 			}
 
-		case ev := <-pidForkMon.Exit:
+		case ev := <-pm.Exit:
 
 			// Check if process really did exit; if not, re-add it
 			pidExists, err := pidExists(ev.Pid)
 			if err == nil && pidExists {
-				logrus.Infof("Received bogus 'exit' notification from pid fork monitor; re-watching.")
+				logrus.Infof("Received bogus 'exit' notification from process monitor; re-watching.")
 
-				if err := pidForkMon.Watch(ev.Pid, psnotify.PROC_EVENT_ALL); err != nil {
+				if err := pm.Watch(ev.Pid, psnotify.PROC_EVENT_ALL); err != nil {
 					// TODO: handle this error correctly
 					logrus.Errorf("Failed to add process monitor for pid %d; syscall interception won't work for that process.", ev.Pid)
 				}
@@ -344,14 +346,14 @@ func (t *syscallTracer) sessionsMonitor() error {
 				logrus.Errorf("Unexpected error: failed to check if process %d exists: %v; will assume it doesn't exist", ev.Pid, err)
 			}
 
-			logrus.Infof("Received 'exit' notification from pid fork monitor; ignoring.")
+			logrus.Infof("Received 'exit' notification from process monitor; ignoring.")
 
-		case <-pidForkMon.Exec:
-			logrus.Infof("Received 'exec' notification form pid from monitor; ignoring.")
+		case <-pm.Exec:
+			logrus.Infof("Received 'exec' notification from process monitor; ignoring.")
 
-		case err := <-pidForkMon.Error:
+		case err := <-pm.Error:
 			// TODO: deal with process monitor errors
-			logrus.Errorf("Received 'error' notification from pid fork monitor: %s", err)
+			logrus.Errorf("Received 'error' notification from process monitor: %s", err)
 		}
 	}
 
