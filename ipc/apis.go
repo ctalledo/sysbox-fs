@@ -65,7 +65,11 @@ func (ips *ipcService) Init() error {
 
 func ContainerPreRegister(ctx interface{}, data *grpc.ContainerData) error {
 
-	logrus.Debugf("Container pre-registration started: id = %s", data.Id)
+	if data.Userns == "" {
+		logrus.Debugf("Container pre-registration started: id = %s", data.Id)
+	} else {
+		logrus.Debugf("Container pre-registration started: id = %s, userns = %s", data.Id, data.Userns)
+	}
 
 	ipcService := ctx.(*ipcService)
 
