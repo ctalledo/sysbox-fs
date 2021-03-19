@@ -668,10 +668,10 @@ func (m *mountSyscallInfo) remountAllowed(
 				// Scenario 1): no-unshare(mnt) & no-privot() & no-chroot()
 				if processRootInode == syscntrRootInode {
 					if immutable {
-						logrus.Debugf("Rejected remount operation over immutable target %s (scenario 1)",
+						logrus.Infof("Rejected remount operation over immutable target %s (scenario 1)",
 							m.Target)
 					} else if bindmountImmutable {
-						logrus.Debugf("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 1)",
+						logrus.Infof("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 1)",
 							m.Target)
 					}
 				}
@@ -679,10 +679,10 @@ func (m *mountSyscallInfo) remountAllowed(
 				// Scenario 2): no-unshare(mnt) & pivot() & no-chroot()
 				if processRootInode != syscntrRootInode {
 					if immutable {
-						logrus.Debugf("Rejected remount operation over immutable target %s (scenario 2)",
+						logrus.Infof("Rejected remount operation over immutable target %s (scenario 2)",
 							m.Target)
 					} else if bindmountImmutable {
-						logrus.Debugf("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 2)",
+						logrus.Infof("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 2)",
 							m.Target)
 					}
 				}
@@ -700,10 +700,10 @@ func (m *mountSyscallInfo) remountAllowed(
 				// Scenario 3): no-unshare(mnt) & no-pivot() & chroot()
 				if processRootInode == syscntrRootInode {
 					if immutable {
-						logrus.Debugf("Rejected remount operation over immutable target %s (scenario 3)",
+						logrus.Infof("Rejected remount operation over immutable target %s (scenario 3)",
 							m.Target)
 					} else if bindmountImmutable {
-						logrus.Debugf("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 3)",
+						logrus.Infof("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 3)",
 							m.Target)
 					}
 				}
@@ -711,10 +711,10 @@ func (m *mountSyscallInfo) remountAllowed(
 				// Scenario 4): no-unshare(mnt) & pivot() & chroot()
 				if processRootInode != syscntrRootInode {
 					if immutable {
-						logrus.Debugf("Rejected remount operation over immutable target %s (scenario 4)",
+						logrus.Infof("Rejected remount operation over immutable target %s (scenario 4)",
 							m.Target)
 					} else if bindmountImmutable {
-						logrus.Debugf("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 4)",
+						logrus.Infof("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 4)",
 							m.Target)
 					}
 				}
@@ -739,7 +739,7 @@ func (m *mountSyscallInfo) remountAllowed(
 					// the overlapped mountpoint is an immutable itself, hence the
 					// checkpoint below.
 					if m.cntr.IsImmutableOverlapMountpoint(info.MountPoint) {
-						logrus.Debugf("Rejected remount operation over immutable overlapped target %s (scenario 5)",
+						logrus.Infof("Rejected remount operation over immutable overlapped target %s (scenario 5)",
 							m.Target)
 						return false, m.tracer.createErrorResponse(m.reqId, syscall.EPERM)
 					}
@@ -751,13 +751,13 @@ func (m *mountSyscallInfo) remountAllowed(
 				// can safely rely on their mountinfo attributes to determine
 				// resource's immutability.
 				if m.cntr.IsImmutableRoMountpoint(info.MountPoint) {
-					logrus.Debugf("Rejected remount operation over immutable target %s (scenario 5)",
+					logrus.Infof("Rejected remount operation over immutable target %s (scenario 5)",
 						m.Target)
 					return false, m.tracer.createErrorResponse(m.reqId, syscall.EPERM)
 				}
 
 				if ok := m.cntr.IsImmutableRoBindMount(info); ok {
-					logrus.Debugf("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 5)",
+					logrus.Infof("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 5)",
 						m.Target)
 					return false, m.tracer.createErrorResponse(m.reqId, syscall.EPERM)
 				}
@@ -768,13 +768,13 @@ func (m *mountSyscallInfo) remountAllowed(
 			// Scenario 6): unshare(mnt) & pivot() & no-chroot()
 			if processRootInode != syscntrRootInode {
 				if m.cntr.IsImmutableRoMount(info) {
-					logrus.Debugf("Rejected remount operation over immutable target %s (scenario 6)",
+					logrus.Infof("Rejected remount operation over immutable target %s (scenario 6)",
 						m.Target)
 					return false, m.tracer.createErrorResponse(m.reqId, syscall.EPERM)
 				}
 
 				if ok := m.cntr.IsImmutableRoBindMount(info); ok {
-					logrus.Debugf("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 6)",
+					logrus.Infof("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 6)",
 						m.Target)
 					return false, m.tracer.createErrorResponse(m.reqId, syscall.EPERM)
 				}
@@ -803,7 +803,7 @@ func (m *mountSyscallInfo) remountAllowed(
 					// the overlapped mountpoint is an immutable itself, hence the
 					// checkpoint below.
 					if m.cntr.IsImmutableOverlapMountpoint(info.MountPoint) {
-						logrus.Debugf("Rejected remount operation over immutable overlapped target %s (scenario 7)",
+						logrus.Infof("Rejected remount operation over immutable overlapped target %s (scenario 7)",
 							m.Target)
 						return false, m.tracer.createErrorResponse(m.reqId, syscall.EPERM)
 					}
@@ -815,13 +815,13 @@ func (m *mountSyscallInfo) remountAllowed(
 				// can safely rely on their mountinfo attributes to determine
 				// resource's immutability.
 				if m.cntr.IsImmutableRoMountpoint(info.MountPoint) {
-					logrus.Debugf("Rejected remount operation over immutable target %s (scenario 7)",
+					logrus.Infof("Rejected remount operation over immutable target %s (scenario 7)",
 						m.Target)
 					return false, m.tracer.createErrorResponse(m.reqId, syscall.EPERM)
 				}
 
 				if ok := m.cntr.IsImmutableRoBindMount(info); ok {
-					logrus.Debugf("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 7)",
+					logrus.Infof("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 7)",
 						m.Target)
 					return false, m.tracer.createErrorResponse(m.reqId, syscall.EPERM)
 				}
@@ -832,13 +832,13 @@ func (m *mountSyscallInfo) remountAllowed(
 			// Scenario 8): unshare(mnt) & pivot() & chroot()
 			if processRootInode != syscntrRootInode {
 				if m.cntr.IsImmutableRoMount(info) {
-					logrus.Debugf("Rejected remount operation over immutable target %s (scenario 8)",
+					logrus.Infof("Rejected remount operation over immutable target %s (scenario 8)",
 						m.Target)
 					return false, m.tracer.createErrorResponse(m.reqId, syscall.EPERM)
 				}
 
 				if ok := m.cntr.IsImmutableRoBindMount(info); ok {
-					logrus.Debugf("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 8)",
+					logrus.Infof("Rejected remount operation over bind-mount to read-only-immutable target %s (scenario 8)",
 						m.Target)
 					return false, m.tracer.createErrorResponse(m.reqId, syscall.EPERM)
 				}

@@ -209,11 +209,11 @@ func (u *umountSyscallInfo) umountAllowed(
 
 					if processRootInode == syscntrRootInode {
 						// Scenario 1): no-unshare(mnt) & no-pivot() & no-chroot()
-						logrus.Debugf("Rejected unmount operation on immutable target %s (scenario 1)",
+						logrus.Infof("Rejected unmount operation on immutable target %s (scenario 1)",
 							u.Target)
 					} else {
 						// Scenario 2): no-unshare(mnt) & pivot() & no-chroot()
-						logrus.Debugf("Rejected unmount operation on immutable target %s (scenario 2)",
+						logrus.Infof("Rejected unmount operation on immutable target %s (scenario 2)",
 							u.Target)
 					}
 
@@ -228,11 +228,11 @@ func (u *umountSyscallInfo) umountAllowed(
 
 					if processRootInode == syscntrRootInode {
 						// Scenario 3: no-unshare(mnt) & no-pivot() & chroot()
-						logrus.Debugf("Rejected unmount operation on immutable target %s (scenario 3)",
+						logrus.Infof("Rejected unmount operation on immutable target %s (scenario 3)",
 							u.Target)
 					} else {
 						// Scenario 4: no-unshare(mnt) & pivot() & chroot()
-						logrus.Debugf("Rejected unmount operation on immutable target %s (scenario 4)",
+						logrus.Infof("Rejected unmount operation on immutable target %s (scenario 4)",
 							u.Target)
 					}
 				}
@@ -258,7 +258,7 @@ func (u *umountSyscallInfo) umountAllowed(
 					// the overlapped mountpoint is an immutable itself, hence the
 					// checkpoint below.
 					if u.cntr.IsImmutableOverlapMountpoint(info.MountPoint) {
-						logrus.Debugf("Rejected unmount operation on immutable overlapped target %s (scenario 5)",
+						logrus.Infof("Rejected unmount operation on immutable overlapped target %s (scenario 5)",
 							u.Target)
 						return false, u.tracer.createErrorResponse(u.reqId, syscall.EPERM)
 					}
@@ -270,7 +270,7 @@ func (u *umountSyscallInfo) umountAllowed(
 				// can safely rely on their mountinfo attributes to determine
 				// resource's immutability.
 				if u.cntr.IsImmutableMountpoint(info.MountPoint) {
-					logrus.Debugf("Rejected unmount operation on immutable target %s (scenario 5)",
+					logrus.Infof("Rejected unmount operation on immutable target %s (scenario 5)",
 						u.Target)
 					return false, u.tracer.createErrorResponse(u.reqId, syscall.EPERM)
 				}
@@ -285,7 +285,7 @@ func (u *umountSyscallInfo) umountAllowed(
 				}
 
 				if u.cntr.IsImmutableMount(info) {
-					logrus.Debugf("Rejected unmount operation on immutable target %s (scenario 6)",
+					logrus.Infof("Rejected unmount operation on immutable target %s (scenario 6)",
 						u.Target)
 					return false, u.tracer.createErrorResponse(u.reqId, syscall.EPERM)
 				}
@@ -314,7 +314,7 @@ func (u *umountSyscallInfo) umountAllowed(
 					// the overlapped mountpoint is an immutable itself, hence the
 					// checkpoint below.
 					if u.cntr.IsImmutableOverlapMountpoint(info.MountPoint) {
-						logrus.Debugf("Rejected unmount operation on immutable overlapped target %s (scenario 7)",
+						logrus.Infof("Rejected unmount operation on immutable overlapped target %s (scenario 7)",
 							u.Target)
 						return false, u.tracer.createErrorResponse(u.reqId, syscall.EPERM)
 					}
@@ -326,7 +326,7 @@ func (u *umountSyscallInfo) umountAllowed(
 				// can safely rely on their mountinfo attributes to determine
 				// resource's immutability.
 				if u.cntr.IsImmutableMountpoint(info.MountPoint) {
-					logrus.Debugf("Rejected unmount operation on immutable target %s (scenario 7)",
+					logrus.Infof("Rejected unmount operation on immutable target %s (scenario 7)",
 						u.Target)
 					return false, u.tracer.createErrorResponse(u.reqId, syscall.EPERM)
 				}
@@ -338,7 +338,7 @@ func (u *umountSyscallInfo) umountAllowed(
 			if processRootInode != syscntrRootInode {
 				if mip.IsOverlapMount(info) {
 					if u.cntr.IsImmutableMount(info) {
-						logrus.Debugf("Rejected unmount operation on immutable overlapped target %s (scenario 8)",
+						logrus.Infof("Rejected unmount operation on immutable overlapped target %s (scenario 8)",
 							u.Target)
 						return false, u.tracer.createErrorResponse(u.reqId, syscall.EPERM)
 					}
@@ -346,7 +346,7 @@ func (u *umountSyscallInfo) umountAllowed(
 				}
 
 				if u.cntr.IsImmutableMount(info) {
-					logrus.Debugf("Rejected unmount operation on immutable target %s (scenario 8)",
+					logrus.Infof("Rejected unmount operation on immutable target %s (scenario 8)",
 						u.Target)
 					return false, u.tracer.createErrorResponse(u.reqId, syscall.EPERM)
 				}
